@@ -1,0 +1,3 @@
+#!/bin/sh
+calculator_prefix=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$calculator_prefix/@CMAKE_INSTALL_LIBEXECDIR@/Calculator/Calculator" "$@"

@@ -10,7 +10,9 @@
 #include "NumberFormattingUtils.h"
 
 using namespace std;
+#if defined(_WIN32) && defined(_MSC_VER)
 using namespace concurrency;
+#endif
 using namespace UnitConversionManager;
 using namespace UnitConversionManager::NumberFormattingUtils;
 
@@ -556,9 +558,10 @@ void UnitConverter::SetViewModelCurrencyCallback(_In_ const shared_ptr<IViewMode
     }
 }
 
-task<pair<bool, wstring>> UnitConverter::RefreshCurrencyRatios()
+AsyncResult<pair<bool, wstring>> UnitConverter::RefreshCurrencyRatios()
 {
     shared_ptr<ICurrencyConverterDataLoader> currencyDataLoader = GetCurrencyConverterDataLoader();
+#if defined(_WIN32) && defined(_MSC_VER)
     task<bool> loadDataResult;
     if (currencyDataLoader != nullptr)
     {
@@ -578,6 +581,16 @@ task<pair<bool, wstring>> UnitConverter::RefreshCurrencyRatios()
 
         return make_pair(didLoad, timestamp);
     });
+#else
+    return async(launch::async, [currencyDataLoader] {
+        if (currencyDataLoader == nullptr)
+        {
+            return make_pair(false, wstring{});
+        }
+        const bool didLoad = currencyDataLoader->TryLoadDataFromWebOverrideAsync().get();
+        return make_pair(didLoad, currencyDataLoader->GetCurrencyTimestamp());
+    });
+#endif
 }
 
 shared_ptr<ICurrencyConverterDataLoader> UnitConverter::GetCurrencyConverterDataLoader()

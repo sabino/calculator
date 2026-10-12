@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Calculator
+Comment=Standard, scientific, programmer, graphing, and conversion calculator
+Exec=Calculator
+Icon=io.github.sabino.calculator
+Terminal=false
+Categories=Utility;Calculator;
+StartupWMClass=Calculator

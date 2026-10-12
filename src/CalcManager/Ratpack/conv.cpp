@@ -42,7 +42,8 @@ wchar_t g_decimalSeparator = L'.';
 // See also
 // * https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros
 // * https://sourceforge.net/p/predef/wiki/Architectures/
-#if defined(MIDL_PASS) || defined(RC_INVOKED) || defined(_M_CEE_PURE) || defined(_M_AMD64) || defined(__ARM_ARCH) || defined(__x86_64__) || defined(_M_ARM64)
+#if defined(MIDL_PASS) || defined(RC_INVOKED) || defined(_M_CEE_PURE) || defined(_M_AMD64) || defined(__ARM_ARCH) || defined(__x86_64__) || defined(_M_ARM64) \
+    || defined(__aarch64__) || defined(__arm64__)
 
 #ifndef Calc_UInt32x32To64
 #define Calc_UInt32x32To64(a, b) ((uint64_t)((uint32_t)(a)) * (uint64_t)((uint32_t)(b)))

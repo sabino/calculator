@@ -26,6 +26,12 @@ static constexpr wstring_view DEFAULT_NUMBER_STR = L"0";
 
 unordered_map<wstring_view, wstring> CCalcEngine::s_engineStrings;
 
+namespace
+{
+    const CCalcEngine* sharedContextEngine = nullptr;
+}
+
+
 void CCalcEngine::LoadEngineStrings(CalculationManager::IResourceProvider& resourceProvider)
 {
     for (const auto& sid : g_sids)
@@ -45,6 +51,7 @@ void CCalcEngine::LoadEngineStrings(CalculationManager::IResourceProvider& resou
 //////////////////////////////////////////////////
 void CCalcEngine::InitialOneTimeOnlySetup(CalculationManager::IResourceProvider& resourceProvider)
 {
+    sharedContextEngine = nullptr;
     LoadEngineStrings(resourceProvider);
 
     // we must now set up all the ratpak constants and our arrayed pointers
@@ -97,8 +104,10 @@ CCalcEngine::CCalcEngine(
     , m_angletype(AngleType::Degrees)
     , m_numwidth(NUM_WIDTH::QWORD_WIDTH)
     , m_HistoryCollector(pCalcDisplay, pHistoryDisplay, DEFAULT_DEC_SEPARATOR)
+    , m_decimalSeparator(DEFAULT_DEC_SEPARATOR)
     , m_groupSeparator(DEFAULT_GRP_SEPARATOR)
 {
+    sharedContextEngine = nullptr;
     InitChopNumbers();
 
     m_dwWordBitWidth = DwWordBitWidthFromNumWidth(m_numwidth);
@@ -108,6 +117,33 @@ CCalcEngine::CCalcEngine(
     SetRadixTypeAndNumWidth(RadixType::Decimal, m_numwidth);
     SettingsChanged();
     DisplayNum();
+    sharedContextEngine = this;
+}
+
+CCalcEngine::~CCalcEngine()
+{
+    if (sharedContextEngine == this)
+    {
+        sharedContextEngine = nullptr;
+    }
+}
+
+void CCalcEngine::RestoreResourceStrings(CalculationManager::IResourceProvider& resourceProvider)
+{
+    LoadEngineStrings(resourceProvider);
+}
+
+void CCalcEngine::RestoreSharedContext()
+{
+    RestoreResourceStrings(*m_resourceProvider);
+    s_engineStrings[SIDS_DECIMAL_SEPARATOR] = m_decimalSeparator;
+    SetDecimalSeparator(m_decimalSeparator);
+    if (sharedContextEngine != this)
+    {
+        // Restore this engine's existing precision and base without changing its operands, memory, or history.
+        ChangeBaseConstants(m_radix, m_cIntDigitsSav, m_precision);
+        sharedContextEngine = this;
+    }
 }
 
 void CCalcEngine::InitChopNumbers()

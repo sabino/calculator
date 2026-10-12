@@ -1,0 +1,37 @@
+<Project Sdk="Uno.Sdk/6.7.30">
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-desktop</TargetFrameworks>
+    <RuntimeIdentifiers>osx-arm64;osx-x64;linux-arm64;linux-x64;win-arm64;win-x64</RuntimeIdentifiers>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Calculator</AssemblyName>
+    <RootNamespace>CalculatorApp.Desktop</RootNamespace>
+    <UnoSingleProject>true</UnoSingleProject>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
+    <PublishTrimmed>false</PublishTrimmed>
+    <ApplicationTitle>Calculator</ApplicationTitle>
+    <ApplicationId>io.github.sabino.calculator</ApplicationId>
+    <ApplicationDisplayVersion>0.0.1</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationPublisher>Sabino</ApplicationPublisher>
+    <UnoMacOSMinimumSystemVersion>15.0</UnoMacOSMinimumSystemVersion>
+    <Description>Calculator with a shared WinUI-compatible Skia interface.</Description>
+    <ApplicationIcon>../CalculatorDesktop/assets/Calculator.ico</ApplicationIcon>
+    <UnoFeatures>SkiaRenderer</UnoFeatures>
+    <!-- Linux ARM64 needs the fontconfig linking fix in this SkiaSharp release. -->
+    <SkiaSharpVersion>3.119.4</SkiaSharpVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <UnoIcon Include="../CalculatorDesktop/assets/icon.svg" ForegroundFile="../CalculatorDesktop/assets/icon.svg" ForegroundScale="1" />
+    <Content Include="../CalculatorDesktop/assets/calculator-256.png" Link="Assets/calculator.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Calculator/Assets/CalculatorIcons.ttf" Link="Assets/CalculatorIcons.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../CalculatorDesktop/assets/LICENSE.txt" Link="Icon-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../LICENSE" Link="Calculator-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../NOTICE.txt" Link="Calculator-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(CalculatorNativeDir)/*" Condition="'$(CalculatorNativeDir)' != ''" Link="%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

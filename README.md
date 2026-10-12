@@ -1,76 +1,99 @@
 # Calculator
-The Windows Calculator app is a modern Windows app written in C++ and C# that ships pre-installed with Windows.
-The app provides standard, scientific, and programmer calculator functionality, as well as a set of converters between various units of measurement and currencies.
 
-Calculator ships regularly with new features and bug fixes. You can get the latest version of Calculator in the [Microsoft Store](https://www.microsoft.com/store/apps/9WZDNCRFHVN5).
+Calculator combines Microsoft's C++ engine with one shared Uno/Skia desktop interface for Windows, macOS, and Linux.
+It preserves the original Windows UWP application, Microsoft attribution, and license notices.
+The [Microsoft Store edition](https://www.microsoft.com/store/apps/9WZDNCRFHVN5) is a separate distribution.
 
-[![Continuous Integration](https://github.com/microsoft/calculator/actions/workflows/action-ci.yml/badge.svg)](https://github.com/microsoft/calculator/actions/workflows/action-ci.yml)
-
-<img src="docs/Images/CalculatorScreenshot.png" alt="Calculator Screenshot" width="450px" />
+[![Desktop CI](https://github.com/sabino/calculator/actions/workflows/desktop-ci.yml/badge.svg?branch=mac)](https://github.com/sabino/calculator/actions/workflows/desktop-ci.yml)
+[![Upstream CI](https://github.com/microsoft/calculator/actions/workflows/action-ci.yml/badge.svg)](https://github.com/microsoft/calculator/actions/workflows/action-ci.yml)
 
 ## Features
-- Standard Calculator functionality which offers basic operations and evaluates commands immediately as they are entered.
-- Scientific Calculator functionality which offers expanded operations and evaluates commands using order of operations.
-- Programmer Calculator functionality which offers common mathematical operations for developers including conversion between common bases.
-- Date Calculation functionality which offers the difference between two dates, as well as the ability to add/subtract years, months and/or days to/from a given input date.
-- Calculation history and memory capabilities.
-- Conversion between many units of measurement.
-- Currency conversion based on data retrieved from [Bing](https://www.bing.com).
-- [Infinite precision](https://en.wikipedia.org/wiki/Arbitrary-precision_arithmetic) for basic
-  arithmetic operations (addition, subtraction, multiplication, division) so that calculations
-  never lose precision.
+
+| Mode | Features |
+| --- | --- |
+| Standard | Basic arithmetic with immediate evaluation |
+| Scientific | Precedence, powers, roots, logarithms, and trigonometry menus |
+| Programmer | Base conversion, word sizes, bit operations, and bit toggling |
+| Date | Gregorian differences and duration shifts |
+| Unit converter | Thirteen categories, including dated currency rates |
+| Graphing | Equations, parameters, viewport controls, tracing, and supported analysis through the optional portable engine |
+
+History and memory support recall and per-item actions.
+The calculation engine retains Microsoft's arbitrary-precision arithmetic implementation.
+Currency uses Frankfurter reference rates, with ECB data as fallback and a per-user offline cache.
 
 ## Getting started
-Prerequisites:
-- Your computer must be running Windows 11, build 22000 or newer.
-- Install the latest version of [Visual Studio](https://developer.microsoft.com/en-us/windows/downloads) (the free community edition is sufficient).
-  - Install the "Universal Windows Platform Development" workload.
-  - Install the optional "C++ Universal Windows Platform tools" component.
-  - Install the latest Windows 11 SDK.
 
-  ![Visual Studio Installation Screenshot](docs/Images/VSInstallationScreenshot.png)
-- Install the [XAML Styler](https://marketplace.visualstudio.com/items?itemName=TeamXavalon.XAMLStyler) Visual Studio extension.
+### Shared desktop application
 
-- Get the code:
-    ```
-    git clone https://github.com/Microsoft/calculator.git
-    ```
+Use CMake 3.21+, Ninja, Python 3.9+, a C++17 compiler, and .NET SDK 10.0.401.
+Windows requires an MSVC developer shell for x64 or ARM64. macOS requires Xcode command line tools.
+The Uno SDK and NuGet dependencies are pinned and restored in locked mode.
 
-- Open [src\Calculator.slnx](/src/Calculator.slnx) in Visual Studio to build and run the Calculator app.
-- For a general description of the Calculator project architecture see [ApplicationArchitecture.md](docs/ApplicationArchitecture.md).
-- To run the UI Tests, you need to make sure that
-  [Windows Application Driver (WinAppDriver)](https://github.com/microsoft/WinAppDriver/releases/latest)
-  is installed.
+```sh
+cmake -S . -B out/desktop -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build out/desktop
+ctest --test-dir out/desktop -LE gui --output-on-failure
+dotnet out/desktop/desktop/Calculator.dll
+```
+
+Publish a self-contained application with `cmake --build out/desktop --target calculator_package`.
+See [desktop builds](docs/NativeDesktop.md) for requirements, package paths, GUI checks, and graphing configuration.
+The interface lives in `src/Calculator.Desktop`; `CalculatorNative` supplies the portable engine through a C interface.
+
+| macOS | Linux |
+| --- | --- |
+| <img src="docs/Images/Native/macos-standard.png" alt="Calculator running on macOS" width="320" /> | <img src="docs/Images/Native/linux-standard.png" alt="Calculator running on Linux" width="320" /> |
+
+Desktop controls share the same Uno/Skia interface. Window chrome follows the host platform.
+See [application icons](docs/Icons.md) for the owned artwork and packaged formats.
+
+### Original Windows UWP application
+
+The original Windows application remains available through its Visual Studio solution.
+It uses the Windows frontend under `src/Calculator`.
+
+Use Visual Studio with the Universal Windows Platform workload, its C++ tools, and the Windows SDK.
+Open [Calculator.slnx](src/Calculator.slnx) to build that application.
+Its UI tests require [Windows Application Driver](https://github.com/microsoft/WinAppDriver/releases/latest).
+See the [original application architecture](docs/ApplicationArchitecture.md) for its components.
 
 ## Contributing
-Want to contribute? The team encourages community feedback and contributions. Please follow our [contributing guidelines](CONTRIBUTING.md).
 
-If Calculator is not working properly, please file a report in the [Feedback Hub](https://insider.windows.com/en-us/fb/?contextid=130).
-We also welcome [issues submitted on GitHub](https://github.com/Microsoft/calculator/issues).
+Follow the [contributing guidelines](CONTRIBUTING.md).
+Report Microsoft Store application issues through [Feedback Hub](https://insider.windows.com/en-us/fb/?contextid=130)
+or the [upstream issue tracker](https://github.com/Microsoft/calculator/issues).
 
 ## Roadmap
-For information regarding Windows Calculator plans and release schedule, please see the [Windows Calculator Roadmap](docs/Roadmap.md).
+
+See the [Windows Calculator Roadmap](docs/Roadmap.md) for the upstream project.
 
 ### Graphing Mode
-Adding graphing calculator functionality [is on the project roadmap](https://github.com/Microsoft/calculator/issues/338) and we hope that this project can create a great end-user experience around graphing. To that end, the UI from the official in-box Windows Calculator is currently part of this repository, although the proprietary Microsoft-built graphing engine, which also drives graphing in Microsoft Mathematics and OneNote, is not. Community members can still be involved in the creation of the UI, however developer builds will not have graphing functionality due to the use of a [mock implementation of the engine](/src/GraphingImpl/Mocks) built on top of a
-[common graphing API](/src/GraphingInterfaces).
+
+The private [portable graphing engine](https://github.com/sabino/graphing-engine) implements the [common graphing API](/src/GraphingInterfaces).
+The shared desktop build detects a sibling checkout or accepts `CALCULATOR_GRAPHING_ENGINE_ROOT`.
+The original UWP build uses `GraphingEngineRoot` to replace its [mock implementation](/src/GraphingImpl/Mocks).
+Microsoft retail graphing behavior remains unverified.
 
 ## Diagnostic Data
-This project collects usage data and sends it to Microsoft to help improve our products and services.
+
+The original Windows application can send usage data to Microsoft.
 Read our [privacy statement](https://go.microsoft.com/fwlink/?LinkId=521839) to learn more.
-Diagnostic data is disabled in development builds by default, and can be enabled with the `SEND_DIAGNOSTICS`
-build flag.
+Development builds disable diagnostic data by default. The `SEND_DIAGNOSTICS` build flag enables it.
 
 ## Currency Converter
-Windows Calculator includes a currency converter feature that uses mock data in developer builds. The data that
-Microsoft uses for the currency converter feature (e.g., in the retail version of the application) is not licensed
-for your use. The mock data will be clearly identifiable as it references planets instead of countries,
-and remains static regardless of selected inputs.
+
+The shared desktop application downloads dated reference rates from [Frankfurter](https://frankfurter.dev/), with ECB data as fallback.
+It identifies the provider and rate dates, and retains valid cached rates during outages.
+The original Windows UWP developer build retains its mock currency provider.
+Microsoft's retail currency data is not licensed for use in this checkout.
 
 ## Reporting Security Issues
+
 Please refer to [SECURITY.md](./SECURITY.md).
 
 ## License
+
 Copyright (c) Microsoft Corporation. All rights reserved.
 
 Licensed under the [MIT License](./LICENSE).

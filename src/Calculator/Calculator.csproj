@@ -9,6 +9,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>CalculatorApp</RootNamespace>
     <AssemblyName>CalculatorApp</AssemblyName>
+    <ApplicationIcon>..\CalculatorDesktop\assets\Calculator.ico</ApplicationIcon>
     <ApplicationType>Windows Store</ApplicationType>
     <AppContainerApplication>true</AppContainerApplication>
     <DefaultLanguage>en-US</DefaultLanguage>
@@ -240,6 +241,9 @@
     </AppxManifest>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="..\CalculatorDesktop\assets\LICENSE.txt">
+      <Link>Icon-LICENSE.txt</Link>
+    </Content>
     <Content Include="..\Calculator.ViewModels\DataLoaders\DefaultFromToCurrency.json">
       <Link>DataLoaders\DefaultFromToCurrency.json</Link>
     </Content>
