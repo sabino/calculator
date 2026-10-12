@@ -78,8 +78,20 @@ public sealed class CalculatorPage : Page
             if (Program.IsSmokeTest)
             {
                 await Task.Yield();
-                try { await RunSmokeChecksAsync(); Console.WriteLine("Shared Skia controls and native interop passed"); Environment.Exit(0); }
-                catch (Exception error) { Console.Error.WriteLine(error); Environment.Exit(1); }
+                try
+                {
+                    await RunSmokeChecksAsync();
+                    Console.WriteLine("Shared Skia controls and native interop passed");
+                }
+                catch (Exception error)
+                {
+                    Console.Error.WriteLine(error);
+                    Environment.ExitCode = 1;
+                }
+                finally
+                {
+                    Application.Current.Exit();
+                }
             }
         };
     }
