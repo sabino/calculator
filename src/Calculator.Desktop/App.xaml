@@ -13,9 +13,9 @@
           <SolidColorBrush x:Key="CalculatorOperationBackground" Color="#F9F9F9" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="CalculatorBackground" Color="#202024" />
-          <SolidColorBrush x:Key="CalculatorDigitBackground" Color="#3A3A40" />
-          <SolidColorBrush x:Key="CalculatorOperationBackground" Color="#303036" />
+          <SolidColorBrush x:Key="CalculatorBackground" Color="#202020" />
+          <SolidColorBrush x:Key="CalculatorDigitBackground" Color="#3B3B3B" />
+          <SolidColorBrush x:Key="CalculatorOperationBackground" Color="#323232" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
       <Style x:Key="CalculatorKey" TargetType="Button">
@@ -24,7 +24,8 @@
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="FontSize" Value="24" />
-        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="CornerRadius" Value="4" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Margin" Value="2" />
         <Setter Property="MinWidth" Value="0" />

@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
@@ -20,7 +22,13 @@ public sealed class ScientificOptionsPanel : StackPanel
     };
     private readonly Action<int> _sendCommand;
     private readonly FontFamily _calculatorIcons;
-    private readonly StackPanel _angleRow = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
+    private readonly Grid _angleRow = new();
+    private readonly Button _angleButton = new() { FontSize = 13, MinWidth = 0, MinHeight = 0,
+        HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
+    private readonly ToggleButton _formatButton = new() { FontSize = 13, MinWidth = 0, MinHeight = 0,
+        HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
     private readonly Flyout _trigonometryFlyout = new() { Placement = FlyoutPlacementMode.Bottom };
     private readonly Flyout _functionFlyout = new() { Placement = FlyoutPlacementMode.Bottom };
     private readonly ToggleButton _inverse = new() { MinWidth = 58, MinHeight = 42 };
@@ -31,6 +39,10 @@ public sealed class ScientificOptionsPanel : StackPanel
     private readonly Button _functionButton;
     private CalculatorSnapshot? _snapshot;
     private bool _isEnabled;
+    private bool _refreshingAngles;
+    private int _size;
+
+    public Grid AngleControls => _angleRow;
 
     public ScientificOptionsPanel(Action<int> sendCommand, FontFamily? calculatorIcons = null)
     {
@@ -40,7 +52,17 @@ public sealed class ScientificOptionsPanel : StackPanel
         Spacing = 6;
         HorizontalAlignment = HorizontalAlignment.Stretch;
         AutomationProperties.SetName(this, "Scientific options");
-        Children.Add(_angleRow);
+        for (var column = 0; column < 7; column++)
+            _angleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(column == 5 ? 0.01 : 1, GridUnitType.Star), MaxWidth = column == 5 ? double.PositiveInfinity : 80 });
+        _angleRow.Children.Add(_angleButton);
+        Grid.SetColumn(_formatButton, 1);
+        _angleRow.Children.Add(_formatButton);
+        _angleButton.Click += (_, _) => CycleAngle();
+        _formatButton.Checked += (_, _) => SendNotation();
+        _formatButton.Unchecked += (_, _) => SendNotation();
+        AutomationProperties.SetName(_formatButton, "Toggle scientific notation");
+        AutomationProperties.SetAutomationId(_formatButton, "FtoeButton");
+        _formatButton.Resources["ToggleButtonBackgroundChecked"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
 
         var menus = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         _trigonometryButton = CreatePopupButton("Trigonometry", "\uF892", "trigButton", _trigonometryFlyout);
@@ -86,6 +108,7 @@ public sealed class ScientificOptionsPanel : StackPanel
         _snapshot = snapshot;
         _isEnabled = snapshot.Mode == 1 && !snapshot.IsError;
         IsHitTestVisible = _isEnabled;
+        _angleRow.IsHitTestVisible = _isEnabled;
         if (!_isEnabled)
         {
             _trigonometryFlyout.Hide();
@@ -105,7 +128,7 @@ public sealed class ScientificOptionsPanel : StackPanel
     {
         Glyph = glyph,
         FontFamily = _calculatorIcons,
-        FontSize = 20,
+        FontSize = _size switch { 2 => 24, 1 => 20, _ => 16 },
         IsHitTestVisible = false
     };
 
@@ -113,39 +136,68 @@ public sealed class ScientificOptionsPanel : StackPanel
     {
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         label.Children.Add(CalculatorIcon(glyph));
-        label.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center });
+        label.Children.Add(new TextBlock { Text = title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center });
         label.Children.Add(new FontIcon { Glyph = "\uE70D", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false });
-        var button = new Button { Content = label, Flyout = flyout, MinHeight = 36, Padding = new Thickness(8, 5, 8, 5) };
+        var button = new Button { Content = label, Flyout = flyout, MinHeight = 40, Padding = new Thickness(8, 5, 8, 5),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
         AutomationProperties.SetName(button, title);
         AutomationProperties.SetAutomationId(button, automationId);
         return button;
     }
 
+    internal void UpdateSize(int size)
+    {
+        _size = size;
+        foreach (var button in new[] { _trigonometryButton, _functionButton })
+        {
+            button.MinHeight = size == 0 ? 44 : 70;
+            if (button.Content is not StackPanel content) continue;
+            ((FontIcon)content.Children[0]).FontSize = size switch { 2 => 24, 1 => 20, _ => 16 };
+            ((TextBlock)content.Children[1]).FontSize = size switch { 2 => 24, 1 => 16, _ => 12 };
+            ((FontIcon)content.Children[2]).FontSize = size == 2 ? 16 : 12;
+        }
+        RefreshTrigonometry();
+        RefreshFunctions();
+    }
+
     private void RefreshAngles(CalculatorSnapshot snapshot)
     {
-        _angleRow.Children.Clear();
-        foreach (var specification in snapshot.AngleButtons)
+        _refreshingAngles = true;
+        try
         {
-            var option = new ToggleButton
+            var specification = snapshot.AngleButtons.FirstOrDefault(button => button.Command == snapshot.AngleCommand);
+            if (specification is not null)
             {
-                Content = specification.Title,
-                IsChecked = specification.Command == snapshot.AngleCommand,
-                IsEnabled = specification.Enabled,
-                MinWidth = 55,
-                Padding = new Thickness(8, 4, 8, 4)
-            };
-            AutomationProperties.SetName(option, specification.AccessibleName);
-            option.Click += (_, _) => _sendCommand(specification.Command);
-            _angleRow.Children.Add(option);
+                _angleButton.Content = specification.Title;
+                _angleButton.IsEnabled = _isEnabled && specification.Enabled;
+                AutomationProperties.SetName(_angleButton, specification.AccessibleName);
+                AutomationProperties.SetAutomationId(_angleButton, specification.Title switch { "RAD" => "radButton", "GRAD" => "gradButton", _ => "degButton" });
+            }
+            var notation = snapshot.ScientificFormatButton;
+            if (notation is not null)
+            {
+                _formatButton.Content = notation.Title;
+                _formatButton.IsChecked = snapshot.ScientificFormat;
+                _formatButton.IsEnabled = _isEnabled && notation.Enabled;
+                _formatButton.Resources["ToggleButtonForegroundChecked"] = new SolidColorBrush(ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
+            }
         }
-        var notation = snapshot.ScientificFormatButton;
-        if (notation is not null)
-        {
-            var button = new ToggleButton { Content = notation.Title, IsChecked = snapshot.ScientificFormat, IsEnabled = notation.Enabled, MinWidth = 55 };
-            AutomationProperties.SetName(button, "Toggle scientific notation");
-            button.Click += (_, _) => _sendCommand(notation.Command);
-            _angleRow.Children.Add(button);
-        }
+        finally { _refreshingAngles = false; }
+    }
+
+    private void SendNotation()
+    {
+        if (!_refreshingAngles && _isEnabled && _snapshot?.ScientificFormatButton is { Enabled: true } notation)
+            _sendCommand(notation.Command);
+    }
+
+    private void CycleAngle()
+    {
+        if (_snapshot is null || !_isEnabled) return;
+        var angles = _snapshot.AngleButtons;
+        var index = angles.ToList().FindIndex(button => button.Command == _snapshot.AngleCommand);
+        if (index < 0) return;
+        _sendCommand(angles[(index + 1) % angles.Count].Command);
     }
 
     private void RefreshTrigonometry()
@@ -220,5 +272,59 @@ public sealed class ScientificOptionsPanel : StackPanel
         _trigonometryFlyout.Hide();
         _functionFlyout.Hide();
         _sendCommand(specification.Command);
+    }
+
+    internal async System.Threading.Tasks.Task RunSmokeChecksAsync(Func<CalculatorSnapshot> getSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(getSnapshot);
+        var originalAngle = getSnapshot().AngleCommand;
+        for (var index = 0; index < 3; index++) InvokeButton(_angleButton);
+        if (getSnapshot().AngleCommand != originalAngle)
+            throw new InvalidOperationException("Angle control did not cycle through DEG, RAD, and GRAD.");
+        var originalFormat = getSnapshot().ScientificFormat;
+        var notationPeer = new ToggleButtonAutomationPeer(_formatButton);
+        if (notationPeer.GetPattern(PatternInterface.Toggle) is not IToggleProvider notationProvider)
+            throw new InvalidOperationException("F-E has no toggle provider.");
+        notationProvider.Toggle();
+        if (getSnapshot().ScientificFormat == originalFormat)
+            throw new InvalidOperationException("F-E did not change the engine's notation.");
+        notationProvider.Toggle();
+        _sendCommand(getSnapshot().AngleButtons.First(button => button.Title == "DEG").Command);
+        _sendCommand(82); // Clear
+        _sendCommand(133); // 3
+        _sendCommand(130); // 0
+        _trigonometryFlyout.ShowAt(_trigonometryButton);
+        await System.Threading.Tasks.Task.Delay(50);
+        InvokeButton(_trigonometryTiles.Children.OfType<Button>().First(button => AutomationProperties.GetName(button) == "sin"));
+        await System.Threading.Tasks.Task.Yield();
+        var primary = getSnapshot().Primary;
+        if (!double.TryParse(primary, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.CurrentCulture, out var sine) || Math.Abs(sine - 0.5) > 1e-12)
+            throw new InvalidOperationException($"Scientific flyout did not evaluate sin(30°): {primary}.");
+        _inverse.IsChecked = true;
+        _hyperbolic.IsChecked = true;
+        if (_trigonometryTiles.Children.OfType<Button>().Count() != 6
+            || !_trigonometryTiles.Children.OfType<Button>().Any(button => AutomationProperties.GetName(button) == "asinh"))
+            throw new InvalidOperationException("Inverse hyperbolic functions are unavailable.");
+        _inverse.IsChecked = false;
+        _hyperbolic.IsChecked = false;
+        _sendCommand(82);
+        _sendCommand(133);
+        _sendCommand(80); // Negate
+        _functionFlyout.ShowAt(_functionButton);
+        await System.Threading.Tasks.Task.Delay(50);
+        InvokeButton(_functionTiles.Children.OfType<Button>().First(button => AutomationProperties.GetName(button) == "Absolute value"));
+        await System.Threading.Tasks.Task.Yield();
+        if (getSnapshot().Primary != "3") throw new InvalidOperationException("Function flyout did not evaluate absolute value.");
+        _sendCommand(originalAngle);
+        _sendCommand(82);
+    }
+
+    private static void InvokeButton(Button button)
+    {
+        var peer = new ButtonAutomationPeer(button);
+        if (peer.GetPattern(PatternInterface.Invoke) is not IInvokeProvider provider)
+            throw new InvalidOperationException("Scientific control has no invoke provider.");
+        provider.Invoke();
     }
 }

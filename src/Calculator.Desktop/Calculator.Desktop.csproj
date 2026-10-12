@@ -28,6 +28,8 @@
     <UnoIcon Include="../CalculatorDesktop/assets/icon.svg" ForegroundFile="../CalculatorDesktop/assets/icon.svg" ForegroundScale="1" />
     <Content Include="../CalculatorDesktop/assets/calculator-256.png" Link="Assets/calculator.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../Calculator/Assets/CalculatorIcons.ttf" Link="Assets/CalculatorIcons.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../CalculatorDesktop/assets/Calculator.ico" Link="Assets/Calculator.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Update="Assets/Fonts/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../CalculatorDesktop/assets/LICENSE.txt" Link="Icon-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../LICENSE" Link="Calculator-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../NOTICE.txt" Link="Calculator-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

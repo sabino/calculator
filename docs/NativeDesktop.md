@@ -2,6 +2,7 @@
 
 Calculator uses one Uno/Skia interface on macOS, Linux, and Windows.
 Shared WinUI controls replace the AppKit and GTK frontends. Window chrome follows the operating system.
+On Windows 11, the native title bar follows Calculator's selected theme and background color.
 Microsoft's C++ calculation engine remains behind the portable `CalculatorNative` C interface.
 The original Windows UWP solution remains in `src/Calculator.slnx`.
 
@@ -81,6 +82,8 @@ CALCULATOR_UI_TEST=1 out/desktop/package/Calculator.app/Contents/MacOS/Calculato
 
 The environment flag is needed because the bundle launcher does not forward managed command-line arguments.
 Linux and Windows executables accept `--smoke-test` directly in an interactive desktop session.
+`--scientific` and `--graphing` select a starting view. The macOS bundle also accepts
+`CALCULATOR_START_MODE=scientific` or `CALCULATOR_START_MODE=graphing` when launched from a terminal.
 
 Install the published application with:
 
@@ -110,6 +113,14 @@ Month ends and leap days clamp according to the shared date model.
 Numeric paste respects the selected base and regional separators.
 History and memory belong to the application session.
 Interface labels are English; bundled engine messages and unit names use the requested locale with English fallback.
+Scientific uses the source application's cycling DEG/RAD/GRAD control, F-E toggle, and Trigonometry/Function flyouts below the memory row.
+Its seven-row keypad uses Calculator's bundled math glyphs and the source font-size breakpoints when resized.
+The built-in navigation toggle opens one left overlay; calculator keyboard shortcuts are suspended while it is open.
+
+Windows uses its installed Segoe UI font. macOS and Linux bundle Microsoft's open [Selawik 1.01](https://github.com/microsoft/Selawik/releases/tag/1.01),
+with static weights and its [SIL Open Font License](../src/Calculator.Desktop/Assets/Fonts/Selawik-LICENSE.txt).
+The release archive SHA-256 is `3f62c51e05e3b5a1e6241cf92a371f0be2ea1183aa87b30718bbd40832a8d423`.
+Selawik provides similar metrics; kerning and rasterization differ from Segoe UI.
 
 Currency downloads use the free [Frankfurter API](https://frankfurter.dev/), with [ECB reference rates](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html) as fallback.
 The interface identifies the provider, observation date or date range, fetch time, and cached/error status.
@@ -152,5 +163,18 @@ Native builds and managed interop have passed on ARM64 macOS, Linux, and Windows
 The packaged applications on all three platforms pass shared UI checks for calculator modes, all converters, date controls, and graph editing.
 Recorded results do not prove every CI architecture or Microsoft retail parity.
 Windows GUI checks and a normal packaged launch have been verified in an interactive Windows 11 session.
+Shared UI checks also exercise repeated sidebar clicks, light/dark themes, scientific angle/notation controls,
+flyout operations, second-function keys, and keypad bounds at narrow, tall, and large window sizes.
+
+## Scientific screenshots
+
+These captures show the running packaged applications. Each platform retains its native window frame.
+
+| macOS | Linux | Windows |
+| --- | --- | --- |
+| ![Calculator Scientific on macOS](Images/Native/macos-scientific.png) | ![Calculator Scientific on Linux](Images/Native/linux-scientific.png) | ![Calculator Scientific on Windows](Images/Native/windows-scientific.png) |
+
+The [Microsoft Calculator reference capture](Images/Native/windows-scientific-reference.png) uses version 11.2607.0.0 on the same Windows 11 VM.
+Screenshots illustrate layout; they do not establish pixel or mathematical parity.
 
 See [application icons](Icons.md) for artwork and regeneration.

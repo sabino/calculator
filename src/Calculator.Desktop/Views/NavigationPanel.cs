@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
@@ -48,7 +50,7 @@ public sealed class NavigationPanel : NavigationView
         OpenPaneLength = 256;
         PaneDisplayMode = NavigationViewPaneDisplayMode.LeftMinimal;
         IsPaneOpen = false;
-        IsPaneToggleButtonVisible = false;
+        IsPaneToggleButtonVisible = true;
         IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
         IsSettingsVisible = true;
         AutomationProperties.SetName(this, "Calculator modes and converters");
@@ -113,5 +115,51 @@ public sealed class NavigationPanel : NavigationView
                 _selectCategory(entry.Index);
                 break;
         }
+    }
+
+    internal void SelectView(int mode, int category)
+    {
+        if (mode == 6) { SelectedItem = SettingsItem; return; }
+        foreach (var item in MenuItems)
+            if (item is NavigationViewItem { Tag: Entry entry } navigationItem
+                && (mode == 3 ? entry.Kind == EntryKind.Category && entry.Index == category
+                    : entry.Kind == EntryKind.Mode && entry.Index == mode))
+            {
+                SelectedItem = navigationItem;
+                return;
+            }
+    }
+
+    internal async System.Threading.Tasks.Task RunSmokeChecksAsync()
+    {
+        ApplyTemplate();
+        UpdateLayout();
+        var toggle = FindToggle(this) ?? throw new InvalidOperationException("Navigation has no pane toggle button.");
+        var content = Content as FrameworkElement ?? throw new InvalidOperationException("Navigation has no content.");
+        var before = content.TransformToVisual(this).TransformPoint(new Windows.Foundation.Point());
+        for (var cycle = 0; cycle < 3; cycle++)
+        {
+            var peer = new ButtonAutomationPeer(toggle);
+            if (peer.GetPattern(PatternInterface.Invoke) is not IInvokeProvider provider)
+                throw new InvalidOperationException("Navigation toggle has no invoke provider.");
+            provider.Invoke();
+            await System.Threading.Tasks.Task.Delay(300);
+            UpdateLayout();
+            if (!IsPaneOpen) throw new InvalidOperationException("Navigation closed immediately after opening.");
+            var after = content.TransformToVisual(this).TransformPoint(new Windows.Foundation.Point());
+            if (Math.Abs(before.X - after.X) > 1 || Math.Abs(before.Y - after.Y) > 1)
+                throw new InvalidOperationException("Navigation moved calculator content instead of overlaying it.");
+            provider.Invoke();
+            await System.Threading.Tasks.Task.Delay(300);
+            if (IsPaneOpen) throw new InvalidOperationException("Navigation did not close after a second click.");
+        }
+    }
+
+    private static Button? FindToggle(DependencyObject element)
+    {
+        if (element is Button { Name: "TogglePaneButton" or "PaneToggleButton" } toggle) return toggle;
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(element); index++)
+            if (FindToggle(VisualTreeHelper.GetChild(element, index)) is { } match) return match;
+        return null;
     }
 }

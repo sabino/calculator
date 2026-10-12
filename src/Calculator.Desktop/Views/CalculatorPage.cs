@@ -23,9 +23,9 @@ public sealed class CalculatorPage : Page
 {
     private readonly Window window;
     private readonly NativeCalculator calculator = new();
-    private readonly Grid root = new() { Margin = new Thickness(8), RowSpacing = 8 };
+    private readonly Grid root = new() { Margin = new Thickness(3, 0, 3, 0) };
     private readonly Grid body = new();
-    private readonly TextBlock heading = new() { FontSize = 24, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly TextBlock heading = new() { FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, -3, 0, 0) };
     private TextBlock result = new();
     private TextBlock expression = new();
     private readonly TextBlock notice = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
@@ -35,7 +35,19 @@ public sealed class CalculatorPage : Page
     private ScientificOptionsPanel? scientificOptions;
     private ProgrammerOptionsPanel? programmerOptions;
     private Grid? numberKeypad;
-    private readonly Button details = new() { Content = new FontIcon { Glyph = "\uE81C", FontSize = 22 }, MinWidth = 40,
+    private Button? memoryDropdown;
+    private int scientificSize;
+    private readonly FontFamily calculatorIcons = new("ms-appx:///Assets/CalculatorIcons.ttf#Calculator Fluent Icons");
+    private static readonly IReadOnlyDictionary<string, string> ButtonGlyphs = new Dictionary<string, string>
+    {
+        ["2nd"] = "\uF897", ["π"] = "\uF7CF", ["x²"] = "\uF7C8", ["x³"] = "\uF7CB",
+        ["1/x"] = "\uF7C9", ["|x|"] = "\uF884", ["√x"] = "\uF899", ["∛x"] = "\uF881",
+        ["n!"] = "\uF887", ["xʸ"] = "\uF7CA", ["ʸ√x"] = "\uF7CD", ["10ˣ"] = "\uF7CC",
+        ["2ˣ"] = "\uF882", ["logᵧx"] = "\uF883", ["eˣ"] = "\uF7CE", ["±"] = "\uF898",
+        ["⌫"] = "\uE94F", ["÷"] = "\uE94A", ["×"] = "\uE947", ["−"] = "\uE949",
+        ["+"] = "\uE948", ["="] = "\uE94E"
+    };
+    private readonly Button details = new() { Content = new FontIcon { Glyph = "\uE81C", FontSize = 20 }, MinWidth = 40,
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
     private readonly ToggleButton keepOnTop = new() { Content = new FontIcon { Glyph = "\uE8A7", FontSize = 18 }, MinWidth = 36,
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
@@ -57,6 +69,11 @@ public sealed class CalculatorPage : Page
     public CalculatorPage(Window window)
     {
         this.window = window;
+        FontFamily = (FontFamily)Application.Current.Resources["ContentControlThemeFontFamily"];
+        ((FontIcon)details.Content).FontFamily = calculatorIcons;
+        ((FontIcon)details.Content).FontSize = 16;
+        ((FontIcon)keepOnTop.Content).FontFamily = calculatorIcons;
+        ((FontIcon)keepOnTop.Content).Glyph = "\uEE49";
         RequestedTheme = ThemePreferences.LoadTheme();
         snapshot = calculator.GetSnapshot();
         navigation = new NavigationPanel(snapshot.Categories, calculator.GetAbout().GraphingEnabled, SetMode, SetCategory, () => SetMode(6));
@@ -72,9 +89,11 @@ public sealed class CalculatorPage : Page
         Content = navigation;
         KeyDown += OnKeyDown;
         ActualThemeChanged += (_, _) => BuildBody();
-        SetMode(Program.Arguments.Contains("--graphing") ? 5 : 0);
+        window.Activated += (_, _) => ApplyWindowTheme();
+        SetMode(Program.InitialMode);
         Loaded += async (_, _) =>
         {
+            ApplyWindowTheme();
             if (Program.IsSmokeTest)
             {
                 await Task.Yield();
@@ -98,16 +117,12 @@ public sealed class CalculatorPage : Page
 
     private Grid CreateHeader()
     {
-        var header = new Grid { ColumnSpacing = 10, Padding = new Thickness(0, 4, 0, 4) };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var header = new Grid { Height = 48, Margin = new Thickness(-3, 0, -3, 0) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var menu = new Button { Content = new FontIcon { Glyph = "\uE700", FontSize = 20 }, MinWidth = 40,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
-        menu.Click += (_, _) => navigation.IsPaneOpen = !navigation.IsPaneOpen;
-        AutomationProperties.SetName(menu, "Choose calculator mode");
-        header.Children.Add(menu);
+        heading.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(heading, 1);
         header.Children.Add(heading);
         Grid.SetColumn(keepOnTop, 2);
@@ -131,6 +146,7 @@ public sealed class CalculatorPage : Page
         if (!calculator.SetCategory(index)) { ShowError(calculator.LastError); return; }
         snapshot = calculator.GetSnapshot();
         heading.Text = snapshot.Categories[index];
+        navigation.SelectView(3, index);
         BuildBody();
         if (index == CurrencyCategory && !Program.IsSmokeTest) _ = RefreshRatesAsync();
     }
@@ -151,6 +167,7 @@ public sealed class CalculatorPage : Page
             if (window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.IsAlwaysOnTop = false;
         }
         snapshot = calculator.GetSnapshot();
+        navigation.SelectView(mode, snapshot.CategoryIndex);
         BuildBody();
     }
 
@@ -159,6 +176,12 @@ public sealed class CalculatorPage : Page
         var theme = ActualTheme == ElementTheme.Light ? "Light" : "Dark";
         var dictionary = (ResourceDictionary)Application.Current.Resources.ThemeDictionaries[theme];
         return (Brush)dictionary[key];
+    }
+
+    private bool ApplyWindowTheme()
+    {
+        return closed || GetBrush("CalculatorBackground") is SolidColorBrush background
+            && WindowAppearance.ApplyTheme(window, ActualTheme, background.Color);
     }
 
     private void BuildBody()
@@ -170,9 +193,12 @@ public sealed class CalculatorPage : Page
         scientificOptions = null;
         programmerOptions = null;
         numberKeypad = null;
+        memoryDropdown = null;
+        scientificSize = 0;
         Background = GetBrush("CalculatorBackground");
         navigation.Background = Background;
         root.Background = Background;
+        ApplyWindowTheme();
         notice.Text = "";
         notice.Visibility = Visibility.Collapsed;
         try
@@ -196,7 +222,7 @@ public sealed class CalculatorPage : Page
                 return;
             }
             var controls = new StackPanel { Spacing = 8 };
-            result = new TextBlock { FontSize = 64, IsTextSelectionEnabled = true };
+            result = new TextBlock { FontSize = 46, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, IsTextSelectionEnabled = true };
             expression = new TextBlock { HorizontalAlignment = HorizontalAlignment.Right, Opacity = 0.7 };
             converted = new TextBlock { FontSize = 30, IsTextSelectionEnabled = true };
             result.ContextFlyout = CreateClipboardMenu(() => snapshot.Primary, true);
@@ -204,23 +230,32 @@ public sealed class CalculatorPage : Page
             converted.ContextFlyout = CreateClipboardMenu(() => snapshot.Converted, false);
             if (viewMode == 3) BuildConverter(controls);
             else BuildCalculatorOptions(controls);
-            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star) });
-            body.Children.Add(controls);
+            bool calculatorLayout = viewMode is 0 or 1;
+            body.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout ? new GridLength(92, GridUnitType.Star) : GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout
+                ? viewMode == 1 ? new GridLength(32, GridUnitType.Star) : GridLength.Auto
+                : new GridLength(1, GridUnitType.Star), MinHeight = viewMode == 1 ? 32 : 0 });
+            body.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout ? new GridLength(32, GridUnitType.Star) : GridLength.Auto, MinHeight = 32 });
+            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(calculatorLayout ? viewMode == 1 ? 276 : 308 : 3, GridUnitType.Star) });
+            if (scientificOptions is not null)
+            {
+                Grid.SetRow(scientificOptions.AngleControls, 1);
+                body.Children.Add(scientificOptions.AngleControls);
+            }
+            else body.Children.Add(controls);
 
-            var display = new Grid { MinHeight = viewMode == 3 ? 100 : viewMode == 0 ? 112 : 64, Padding = new Thickness(8, 0, 12, 4) };
-            display.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            display.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var display = new Grid { MinHeight = calculatorLayout ? 72 : viewMode == 3 ? 100 : 64, Padding = new Thickness(6, 0, 10, 0) };
+            display.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout ? new GridLength(20, GridUnitType.Star) : GridLength.Auto });
+            display.RowDefinitions.Add(new RowDefinition { Height = new GridLength(calculatorLayout ? 72 : 1, GridUnitType.Star) });
             display.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             display.Children.Add(expression);
             var scaledResult = new Viewbox { Child = result, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly,
-                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = calculatorLayout ? VerticalAlignment.Top : VerticalAlignment.Center };
             Grid.SetRow(scaledResult, 1);
             display.Children.Add(scaledResult);
             if (viewMode == 3) { Grid.SetRow(converted, 2); display.Children.Add(converted); }
-            Grid.SetRow(display, 1);
+            expression.VerticalAlignment = VerticalAlignment.Bottom;
+            Grid.SetRow(display, calculatorLayout ? 0 : 1);
             body.Children.Add(display);
 
             var memoryRow = new Grid();
@@ -228,11 +263,23 @@ public sealed class CalculatorPage : Page
             {
                 for (int index = 0; index < snapshot.MemoryButtons.Count; index++)
                 {
-                    memoryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    memoryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 80 });
                     var button = CreateCommandButton(snapshot.MemoryButtons[index], true);
                     Grid.SetColumn(button, index);
                     memoryRow.Children.Add(button);
                 }
+                memoryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.01, GridUnitType.Star) });
+                memoryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 80 });
+                var caption = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+                caption.Children.Add(new TextBlock { Text = "M", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+                caption.Children.Add(new FontIcon { Glyph = "\uE70D", FontSize = 8, VerticalAlignment = VerticalAlignment.Center });
+                memoryDropdown = new Button { Content = caption, Style = (Style)Application.Current.Resources["CalculatorKey"],
+                    Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), MinHeight = 32, Padding = new Thickness(0) };
+                memoryDropdown.Resources["ButtonBackgroundDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                AutomationProperties.SetName(memoryDropdown, "Show stored memory");
+                memoryDropdown.Click += (_, _) => ShowDetails(true);
+                Grid.SetColumn(memoryDropdown, snapshot.MemoryButtons.Count + 1);
+                memoryRow.Children.Add(memoryDropdown);
             }
             Grid.SetRow(memoryRow, 2);
             body.Children.Add(memoryRow);
@@ -253,8 +300,33 @@ public sealed class CalculatorPage : Page
                     keypad.Children.Add(button);
                 }
             }
-            Grid.SetRow(keypad, 3);
-            body.Children.Add(keypad);
+            if (scientificOptions is not null)
+            {
+                var scientificKeypad = new Grid();
+                scientificKeypad.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = 44 });
+                scientificKeypad.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                scientificOptions.VerticalAlignment = VerticalAlignment.Center;
+                scientificKeypad.Children.Add(scientificOptions);
+                Grid.SetRow(keypad, 1);
+                scientificKeypad.Children.Add(keypad);
+                Grid.SetRow(scientificKeypad, 3);
+                body.Children.Add(scientificKeypad);
+                scientificKeypad.SizeChanged += (_, _) =>
+                {
+                    if (viewMode != 1) return;
+                    int size = scientificKeypad.ActualWidth >= 878 && scientificKeypad.ActualHeight >= 851 ? 2
+                        : scientificKeypad.ActualWidth >= 527 && scientificKeypad.ActualHeight >= 523 ? 1 : 0;
+                    if (size == scientificSize) return;
+                    scientificSize = size;
+                    RefreshDisplay();
+                    scientificOptions?.UpdateSize(size);
+                };
+            }
+            else
+            {
+                Grid.SetRow(keypad, 3);
+                body.Children.Add(keypad);
+            }
         }
         finally
         {
@@ -267,13 +339,22 @@ public sealed class CalculatorPage : Page
     {
         var button = new Button { Content = spec.Title, IsEnabled = spec.Enabled, Style = (Style)Application.Current.Resources["CalculatorKey"] };
         AutomationProperties.SetName(button, spec.AccessibleName);
-        button.FontSize = compact ? 16 : spec.Title.Length > 4 ? 18 : viewMode is 1 or 2 ? 20 : 24;
-        if (compact) { button.MinHeight = 32; button.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); }
+        SetButtonCaption(button, spec, compact);
+        if (compact)
+        {
+            button.MinHeight = 32;
+            button.Padding = new Thickness(0);
+            button.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            button.Resources["ButtonBackgroundDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        }
         else
         {
             if (viewMode is 1 or 2) { button.MinHeight = 28; button.Padding = new Thickness(2); button.Margin = new Thickness(1); }
-            bool digit = spec.Title.Length == 1 && char.IsLetterOrDigit(spec.Title[0]);
+            bool digit = spec.Title.Length == 1 && char.IsDigit(spec.Title[0]) || spec.AccessibleName == "Decimal point"
+                || spec.Title == "±" || viewMode == 2 && spec.Title.Length == 1 && spec.Title[0] is >= 'A' and <= 'F';
             button.Background = GetBrush(digit ? "CalculatorDigitBackground" : "CalculatorOperationBackground");
+            if (viewMode == 1 && spec.Title == "2nd" && snapshot.ScientificShift)
+                button.Background = new SolidColorBrush(ActualTheme == ElementTheme.Dark ? Color.FromArgb(255, 62, 69, 75) : Color.FromArgb(255, 215, 231, 247));
             if (spec.Title == "=")
             {
                 button.Background = new SolidColorBrush(ActualTheme == ElementTheme.Dark ? Color.FromArgb(255, 76, 194, 255) : Color.FromArgb(255, 0, 103, 192));
@@ -283,6 +364,26 @@ public sealed class CalculatorPage : Page
         button.Click += (_, _) => SendCommand(spec.Command);
         commandButtons.Add(button, spec.Command);
         return button;
+    }
+
+    private void SetButtonCaption(Button button, CalculatorButton spec, bool compact = false)
+    {
+        bool glyph = ButtonGlyphs.TryGetValue(spec.Title, out var symbol);
+        button.FontFamily = glyph ? calculatorIcons : FontFamily;
+        bool digit = spec.Title.Length == 1 && char.IsDigit(spec.Title[0]) || spec.AccessibleName == "Decimal point";
+        bool arithmetic = spec.Title is "+" or "−" or "×" or "÷" or "=";
+        button.FontSize = compact ? 12 : viewMode == 1
+            ? digit ? scientificSize switch { 2 => 38, 1 => 24, _ => 18 }
+                : spec.Title == "±" && scientificSize == 2 ? 48 : scientificSize switch { 2 => 34, 1 => 20, _ => 14 }
+            : digit || arithmetic ? 20 : spec.Title is "±" or "(" or ")" ? 16 : glyph ? 20 : 16;
+        if (button.Content is not TextBlock caption)
+        {
+            caption = new TextBlock { IsHitTestVisible = false, FontWeight = Microsoft.UI.Text.FontWeights.Normal };
+            button.Content = caption;
+        }
+        caption.Text = glyph ? symbol : spec.Title;
+        caption.FontFamily = button.FontFamily;
+        caption.FontSize = button.FontSize;
     }
 
     private IReadOnlyList<IReadOnlyList<CalculatorButton>> GetKeypadRows()
@@ -308,7 +409,6 @@ public sealed class CalculatorPage : Page
         {
             scientificOptions = new ScientificOptionsPanel(SendCommand);
             scientificOptions.Update(snapshot);
-            controls.Children.Add(scientificOptions);
         }
         if (viewMode != 2) return;
         programmerOptions = new ProgrammerOptionsPanel(SendCommand);
@@ -433,7 +533,12 @@ public sealed class CalculatorPage : Page
         var specs = snapshot.ButtonRows.SelectMany(row => row).Concat(snapshot.MemoryButtons).Concat(snapshot.AngleButtons)
             .Concat(snapshot.BaseButtons).Concat(snapshot.WordButtons).GroupBy(spec => spec.Command).ToDictionary(group => group.Key, group => group.Last());
         foreach (var entry in commandButtons)
-            if (specs.TryGetValue(entry.Value, out var spec)) { entry.Key.IsEnabled = spec.Enabled; entry.Key.Content = spec.Title; }
+            if (specs.TryGetValue(entry.Value, out var spec))
+            {
+                entry.Key.IsEnabled = spec.Enabled;
+                SetButtonCaption(entry.Key, spec, snapshot.MemoryButtons.Any(memory => memory.Command == entry.Value));
+            }
+        if (memoryDropdown is not null) memoryDropdown.IsEnabled = snapshot.Memory.Count > 0;
         scientificOptions?.Update(snapshot);
         programmerOptions?.Update(snapshot);
     }
@@ -482,6 +587,11 @@ public sealed class CalculatorPage : Page
 
     private async void OnKeyDown(object sender, KeyRoutedEventArgs args)
     {
+        if (navigation.IsPaneOpen)
+        {
+            if (args.Key == VirtualKey.Escape) { navigation.IsPaneOpen = false; args.Handled = true; }
+            return;
+        }
         if (viewMode >= 4 || args.Handled) return;
         if (XamlRoot is null || FocusManager.GetFocusedElement(XamlRoot) is TextBox or ComboBox or NumberBox) return;
         var core = CoreWindow.GetForCurrentThread();
@@ -680,16 +790,60 @@ public sealed class CalculatorPage : Page
         provider.Invoke();
     }
 
+    private void InvokeKey(string title)
+    {
+        int command = snapshot.ButtonRows.SelectMany(row => row).First(button => button.Title == title).Command;
+        InvokeButton(commandButtons.First(button => button.Value == command).Key);
+    }
+
     public async Task RunSmokeChecksAsync()
     {
+        await navigation.RunSmokeChecksAsync();
+        var originalTheme = RequestedTheme;
+        try
+        {
+            foreach (var theme in new[] { ElementTheme.Light, ElementTheme.Dark })
+            {
+                RequestedTheme = theme;
+                await Task.Delay(50);
+                UpdateLayout();
+                if (!ApplyWindowTheme()) throw new InvalidOperationException("Windows could not apply the Calculator title-bar theme.");
+            }
+        }
+        finally { RequestedTheme = originalTheme; }
+        await Task.Delay(100);
         SetMode(0);
-        InvokeButton(commandButtons.Keys.First(button => (string)button.Content == "2"));
-        InvokeButton(commandButtons.Keys.First(button => (string)button.Content == "+"));
-        InvokeButton(commandButtons.Keys.First(button => (string)button.Content == "3"));
-        InvokeButton(commandButtons.Keys.First(button => (string)button.Content == "="));
+        InvokeKey("2");
+        InvokeKey("+");
+        InvokeKey("3");
+        InvokeKey("=");
         if (result.Text != "5") throw new InvalidOperationException("Shared keypad arithmetic failed.");
         SetMode(1);
-        if (commandButtons.Count < 20) throw new InvalidOperationException("Scientific keypad is incomplete.");
+        if (commandButtons.Count != 40 || scientificOptions is null)
+            throw new InvalidOperationException("Scientific keypad is incomplete.");
+        await scientificOptions.RunSmokeChecksAsync(calculator.GetSnapshot);
+        InvokeKey("C");
+        InvokeKey("3");
+        InvokeKey("2nd");
+        InvokeKey("x³");
+        if (result.Text != "27") throw new InvalidOperationException("Scientific second-function keys failed.");
+        InvokeKey("2nd");
+        foreach (var size in new[] { new SizeInt32 { Width = 320, Height = 500 }, new SizeInt32 { Width = 420, Height = 900 },
+            new SizeInt32 { Width = 900, Height = 1400 }, new SizeInt32 { Width = 420, Height = 680 } })
+        {
+            window.AppWindow.Resize(size);
+            await Task.Delay(100);
+            UpdateLayout();
+            var angleBounds = scientificOptions!.AngleControls.TransformToVisual(body).TransformBounds(new Rect(0, 0,
+                scientificOptions.AngleControls.ActualWidth, scientificOptions.AngleControls.ActualHeight));
+            var menuBounds = scientificOptions.TransformToVisual(body).TransformBounds(new Rect(0, 0,
+                scientificOptions.ActualWidth, scientificOptions.ActualHeight));
+            var keyBounds = numberKeypad!.TransformToVisual(body).TransformBounds(new Rect(0, 0,
+                numberKeypad.ActualWidth, numberKeypad.ActualHeight));
+            if (angleBounds.Height < 32 || menuBounds.Top < angleBounds.Bottom || keyBounds.Top < menuBounds.Bottom - 1
+                || keyBounds.Height < 7 * 28 || keyBounds.Bottom > body.ActualHeight + 1)
+                throw new InvalidOperationException("Scientific controls overlap or the keypad is clipped after resizing.");
+        }
         SetMode(2);
         if (programmerOptions?.RunSmokeChecks() != true)
             throw new InvalidOperationException("Programmer controls failed. " + programmerOptions?.LastSmokeFailure);

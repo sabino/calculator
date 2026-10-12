@@ -11,7 +11,10 @@ public sealed partial class App : Application
 
     public App()
     {
+        Uno.UI.FeatureConfiguration.Font.DefaultTextFontFamily = OperatingSystem.IsWindows()
+            ? "Segoe UI" : "ms-appx:///Assets/Fonts/selawk.ttf";
         InitializeComponent();
+        Resources["ContentControlThemeFontFamily"] = new Microsoft.UI.Xaml.Media.FontFamily(Uno.UI.FeatureConfiguration.Font.DefaultTextFontFamily);
         DispatcherShutdownMode = DispatcherShutdownMode.OnLastWindowClose;
         UnhandledException += (_, args) => Console.Error.WriteLine(args.Exception);
     }
@@ -28,6 +31,8 @@ public sealed partial class App : Application
         var page = new CalculatorPage(window);
         window.Content = page;
         window.SetWindowIcon();
+        if (OperatingSystem.IsWindows())
+            page.Loaded += (_, _) => window.AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "Calculator.ico"));
         window.Closed += (_, _) => page.CloseSession();
         window.Activate();
     }
