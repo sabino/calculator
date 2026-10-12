@@ -54,7 +54,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build python3 xvfb xauth \
+          sudo apt-get install -y cmake ninja-build python3 xvfb xauth gdb \
             libfontconfig1 libfreetype6 libx11-6 libxrandr2 libxcursor1 \
             libxrender1 libxi6 libxfixes3 libxext6 libxtst6 libgl1 libice6 libsm6
       - name: Build, check native interop, and package on Windows
@@ -93,7 +93,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           xvfb-run -a -s '-screen 0 1280x1024x24' sh -c '
-            ctest --test-dir out/desktop-ci -R "^desktop_ui$" --output-on-failure &&
+            if ! ctest --test-dir out/desktop-ci -R "^desktop_ui$" --output-on-failure; then
+              gdb --batch -ex run -ex "thread apply all bt" --args dotnet out/desktop-ci/desktop/Calculator.dll --smoke-test
+              exit 1
+            fi
             out/desktop-ci/package/Calculator --smoke-test
           '
       - name: Exercise the macOS application bundle
