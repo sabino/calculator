@@ -1,0 +1,8 @@
+// Generated from the Windows package manifest and repository license.
+#pragma once
+namespace Desktop::Generated
+{
+inline constexpr char VERSION[] = "@desktop_version@";
+inline constexpr char COPYRIGHT[] = R"copyright(@desktop_copyright@)copyright";
+inline constexpr char LICENSE[] = R"license(@desktop_license@)license";
+}

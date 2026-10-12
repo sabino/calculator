@@ -3,6 +3,9 @@
 #if defined(_WIN32) && defined(_MSC_VER)
 
 #include <sal.h>
+#ifndef _Frees_ptr_opt_
+#define _Frees_ptr_opt_ _In_opt_ _Post_invalid_
+#endif
 
 #else
 

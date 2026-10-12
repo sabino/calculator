@@ -59,6 +59,9 @@ public:
         CalculationManager::IResourceProvider* const pResourceProvider,
         __in_opt ICalcDisplay* pCalcDisplay,
         __in_opt std::shared_ptr<IHistoryDisplay> pHistoryDisplay);
+    ~CCalcEngine();
+    void RestoreSharedContext();
+    static void RestoreResourceStrings(CalculationManager::IResourceProvider& resourceProvider);
     void ProcessCommand(OpCode wID);
     void DisplayError(uint32_t nError);
     std::unique_ptr<CalcEngine::Rational> PersistedMemObject();

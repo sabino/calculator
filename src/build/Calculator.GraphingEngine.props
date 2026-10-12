@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <GraphingEngineRoot Condition="'$(GraphingEngineRoot)' == '' and Exists('$(MSBuildThisFileDirectory)..\..\..\graphing-engine\CMakeLists.txt')">$(MSBuildThisFileDirectory)..\..\..\graphing-engine</GraphingEngineRoot>
+    <_GraphingEngineRoot Condition="'$(GraphingEngineRoot)' != ''">$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(GraphingEngineRoot)'))</_GraphingEngineRoot>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(_GraphingEngineRoot)' != ''">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(_GraphingEngineRoot)include;$(_GraphingEngineRoot)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>GRAPHING_ENGINE_SHARED;GRAPHING_ENGINE_IMPL;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>d2d1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup Condition="'$(_GraphingEngineRoot)' != ''">
+    <ClCompile Remove="Mocks\MathSolver.cpp" />
+    <ClInclude Remove="Mocks\*.h" />
+    <_GraphingEngineSource Include="$(_GraphingEngineRoot)src\Engine.cpp;$(_GraphingEngineRoot)src\Expression.cpp;$(_GraphingEngineRoot)src\Options.cpp;$(_GraphingEngineRoot)src\Analyzer.cpp;$(_GraphingEngineRoot)src\Renderer.cpp;$(_GraphingEngineRoot)src\Scene.cpp" />
+    <ClCompile Include="@(_GraphingEngineSource)">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemGroup>
+  <Target Name="ValidateGraphingEngineRoot" BeforeTargets="PrepareForBuild" Condition="'$(_GraphingEngineRoot)' != ''">
+    <Error Condition="!Exists('$(_GraphingEngineRoot)CMakeLists.txt') or !Exists('$(_GraphingEngineRoot)include\GraphingInterfaces\IMathSolver.h') or !Exists('$(_GraphingEngineRoot)include\graphing\Scene.h')" Text="GraphingEngineRoot must name a graphing-engine source checkout containing CMakeLists.txt and its public headers. Received: $(GraphingEngineRoot)" />
+    <Error Condition="!Exists('%(_GraphingEngineSource.Identity)')" Text="GraphingEngineRoot is missing required source: %(_GraphingEngineSource.Identity)" />
+  </Target>
+</Project>

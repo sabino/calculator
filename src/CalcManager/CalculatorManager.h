@@ -85,6 +85,7 @@ namespace CalculationManager
         void InputChanged() override;
         CalculatorManager(_In_ ICalcDisplay* displayCallback, _In_ IResourceProvider* resourceProvider);
 
+        void RestoreSharedContext();
         void Reset(bool clearMemory = true);
         void SetStandardMode();
         void SetScientificMode();

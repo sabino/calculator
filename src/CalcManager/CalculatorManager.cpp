@@ -32,6 +32,19 @@ namespace CalculationManager
         CCalcEngine::InitialOneTimeOnlySetup(*m_resourceProvider);
     }
 
+    void CalculatorManager::RestoreSharedContext()
+    {
+        if (m_currentCalculatorEngine)
+        {
+            m_currentCalculatorEngine->RestoreSharedContext();
+        }
+        else
+        {
+            CCalcEngine::RestoreResourceStrings(*m_resourceProvider);
+            SetDecimalSeparator(m_resourceProvider->GetCEngineString(L"sDecimal").front());
+        }
+    }
+
     /// <summary>
     /// Call the callback function using passed in IDisplayHelper.
     /// Used to set the primary display value on ViewModel

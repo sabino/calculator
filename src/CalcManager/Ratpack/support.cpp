@@ -19,6 +19,7 @@
 //----------------------------------------------------------------------------
 
 #include <string>
+#include <cmath>
 #include <cstring>  // for memmove
 #include <iostream> // for wostream
 #include "ratpak.h"

@@ -1,0 +1,124 @@
+name: Desktop Calculator
+
+on:
+  push:
+    branches: [main, mac, release/**, feature/**]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      upload_packages:
+        description: Upload desktop packages when Actions storage is available
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Calculator ${{ matrix.rid }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            rid: linux-x64
+          - runner: ubuntu-24.04-arm
+            rid: linux-arm64
+          - runner: macos-15-intel
+            rid: osx-x64
+          - runner: macos-15
+            rid: osx-arm64
+          - runner: windows-2025-vs2026
+            rid: win-x64
+            vc_arch: x64
+            vc_component: Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+          - runner: windows-11-vs2026-arm
+            rid: win-arm64
+            vc_arch: arm64
+            vc_component: Microsoft.VisualStudio.Component.VC.Tools.ARM64
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: src/Calculator.Desktop/global.json
+      - name: Install Linux build and X11 dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build python3 xvfb xauth gdb \
+            libfontconfig1 libfreetype6 libx11-6 libxrandr2 libxcursor1 \
+            libxrender1 libxi6 libxfixes3 libxext6 libxtst6 libgl1 libice6 libsm6
+      - name: Build, check native interop, and package on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products '*' -requires '${{ matrix.vc_component }}' -property installationPath
+          if (!$installation) { throw 'The matching MSVC toolchain is missing.' }
+          $developerShell = Join-Path $installation 'Common7\Tools\VsDevCmd.bat'
+          $commands = @(
+            "call `"$developerShell`" -arch=${{ matrix.vc_arch }} -host_arch=${{ matrix.vc_arch }}",
+            'cmake -S . -B out/desktop-ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCALCULATOR_BUILD_UI=ON -DCALCULATOR_BUILD_BRIDGE=ON -DCALCULATOR_GRAPHING_ENGINE_ROOT= -DCALCULATOR_RUNTIME_ID=${{ matrix.rid }}',
+            'cmake --build out/desktop-ci --parallel 2',
+            'ctest --test-dir out/desktop-ci -LE gui --output-on-failure',
+            'cmake --build out/desktop-ci --target calculator_package --parallel 2'
+          )
+          & cmd.exe /d /c ($commands -join ' && ')
+          exit $LASTEXITCODE
+      - name: Configure desktop on macOS and Linux
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B out/desktop-ci -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON -DCALCULATOR_BUILD_UI=ON -DCALCULATOR_BUILD_BRIDGE=ON
+          -DCALCULATOR_GRAPHING_ENGINE_ROOT= -DCALCULATOR_RUNTIME_ID=${{ matrix.rid }}
+      - name: Build native engine and shared desktop controls
+        if: runner.os != 'Windows'
+        run: cmake --build out/desktop-ci --parallel 2
+      - name: Check native engine and managed interop
+        if: runner.os != 'Windows'
+        run: ctest --test-dir out/desktop-ci -LE gui --output-on-failure
+      - name: Package Calculator
+        if: runner.os != 'Windows'
+        run: cmake --build out/desktop-ci --target calculator_package --parallel 2
+      - name: Exercise Linux controls and packaged application under Xvfb
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a -s '-screen 0 1280x1024x24' sh -c '
+            if ! ctest --test-dir out/desktop-ci -R "^desktop_ui$" --output-on-failure; then
+              gdb --batch -ex run -ex "thread apply all bt" --args dotnet out/desktop-ci/desktop/Calculator.dll --smoke-test
+              exit 1
+            fi
+            out/desktop-ci/package/Calculator --smoke-test
+          '
+      - name: Exercise the macOS application bundle
+        if: runner.os == 'macOS'
+        env:
+          CALCULATOR_UI_TEST: '1'
+        run: out/desktop-ci/package/Calculator.app/Contents/MacOS/Calculator
+      - name: Record Windows GUI coverage boundary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          Write-Output 'Windows native engine, managed interop, and packaging are required.
+          GUI smoke checks require an interactive desktop and are not claimed by this hosted runner.'
+      - name: Archive desktop package
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
+        shell: bash
+        run: tar -czf out/calculator-${{ matrix.rid }}.tar.gz -C out/desktop-ci package
+      - name: Upload desktop package
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Calculator-${{ matrix.rid }}
+          path: out/calculator-${{ matrix.rid }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7

@@ -295,3 +295,9 @@ src/GraphControl/GraphingImplOverrides.props
 !src/x64
 !src/x86
 !src/out
+
+# CMake desktop builds
+/out/
+/CMakeUserPresets.json
+.nrepl-port
+.DS_Store
