@@ -5,6 +5,8 @@
 #include "DateCalculator.h"
 #include "DesktopModel.h"
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -352,6 +354,9 @@ namespace
             result += Quote(units[index].name);
         }
         const auto& currency = model.GetCurrencyState();
+        std::ostringstream ratio;
+        ratio.imbue(std::locale::classic());
+        ratio << std::setprecision(17) << model.GetCurrencyRatio();
         const bool frankfurter = currency.provider_id == 1;
         return result + "],\"currency\":{\"available\":" + (currency.available ? "true" : "false") +
                ",\"providerId\":" + std::to_string(currency.provider_id) + ",\"provider\":" +
@@ -364,7 +369,9 @@ namespace
                ",\"fetchedAt\":" + Quote(currency.fetched_at) +
                ",\"status\":" + Quote(currency.status) + ",\"error\":" + Quote(currency.error) + "},\"categoryIndex\":" + std::to_string(model.GetCategoryIndex()) +
                ",\"fromUnitIndex\":" + std::to_string(model.GetFromUnitIndex()) +
-               ",\"toUnitIndex\":" + std::to_string(model.GetToUnitIndex()) + "}";
+               ",\"toUnitIndex\":" + std::to_string(model.GetToUnitIndex()) +
+               ",\"supportsNegative\":" + (categories[model.GetCategoryIndex()].supportsNegative ? "true" : "false") +
+               ",\"currencyRatio\":" + ratio.str() + "}";
     }
 
     void RequireCalculatorMode(const Desktop::DesktopModel& model)

@@ -22,11 +22,22 @@ public sealed class ProgrammerOptionsPanel : StackPanel
     private static readonly string[] ShiftNames = ["Arithmetic shift", "Logical shift", "Rotate circular", "Rotate through carry"];
     private readonly Action<int> _sendCommand;
     private readonly FontFamily _icons = new("ms-appx:///Assets/CalculatorIcons.ttf#Calculator Fluent Icons");
-    private readonly RadioButton[] _baseRows = new RadioButton[4];
+    private readonly Button[] _baseRows = new Button[4];
+    private readonly Border[] _baseIndicators = new Border[4];
+    public Grid RadixControls { get; } = new();
+    public Grid InputControls { get; } = new();
+    public Grid BitControls => _bits;
+    public Button LeftShiftButton => _shiftButtons[0];
+    public Button RightShiftButton => _shiftButtons[1];
+    private readonly Border _numberIndicator = Indicator();
+    private readonly Border _bitIndicator = Indicator();
+    private readonly Button _memoryStore = SubtleButton();
+    private readonly Button _memoryList = SubtleButton();
+    public event Action? MemoryRequested;
     private readonly TextBlock[] _baseValues = new TextBlock[4];
-    private readonly RadioButton _numberMode = new() { GroupName = "ProgrammerInput", IsChecked = true, MinHeight = 36 };
-    private readonly RadioButton _bitMode = new() { GroupName = "ProgrammerInput", MinHeight = 36 };
-    private readonly Button _wordWidth = new() { MinWidth = 78, MinHeight = 36 };
+    private readonly Button _numberMode = SubtleButton();
+    private readonly Button _bitMode = SubtleButton();
+    private readonly Button _wordWidth = SubtleButton();
     private readonly MenuFlyout _wordMenu = new();
     private readonly Flyout _bitwiseFlyout = new() { Placement = FlyoutPlacementMode.Bottom };
     private readonly Flyout _shiftFlyout = new() { Placement = FlyoutPlacementMode.Bottom };
@@ -45,59 +56,86 @@ public sealed class ProgrammerOptionsPanel : StackPanel
     {
         ArgumentNullException.ThrowIfNull(sendCommand);
         _sendCommand = sendCommand;
-        Spacing = 6;
         HorizontalAlignment = HorizontalAlignment.Stretch;
         AutomationProperties.SetName(this, "Programmer options");
         for (var index = 0; index < Radices.Length; index++)
         {
             var slot = index;
-            var row = new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+            RadixControls.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 24 });
+            var row = new Grid { Padding = new Thickness(12, 0, 12, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.Children.Add(new TextBlock { Text = index switch { 0 => "HEX", 1 => "DEC", 2 => "OCT", _ => "BIN" } });
-            var value = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+            row.Children.Add(new TextBlock { Text = index switch { 0 => "HEX", 1 => "DEC", 2 => "OCT", _ => "BIN" }, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+            var value = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             _baseValues[index] = value;
             Grid.SetColumn(value, 1);
             row.Children.Add(value);
-            var option = new RadioButton { Content = row, GroupName = "ProgrammerRadix", HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch, MinHeight = 32 };
+            var option = SubtleButton();
+            option.Content = row;
+            option.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            option.Padding = new Thickness(0);
             AutomationProperties.SetName(option, $"Base {Radices[index]}");
             AutomationProperties.SetAutomationId(option, $"radix{Radices[index]}");
-            option.Checked += (_, _) => SelectBase(slot);
+            option.Click += (_, _) => SelectBase(slot);
             _baseRows[index] = option;
-            Children.Add(option);
+            var indicator = Indicator();
+            indicator.Width = 3; indicator.Height = 16;
+            indicator.HorizontalAlignment = HorizontalAlignment.Left;
+            indicator.VerticalAlignment = VerticalAlignment.Center;
+            _baseIndicators[index] = indicator;
+            var container = new Grid();
+            container.Children.Add(option); container.Children.Add(indicator);
+            Grid.SetRow(container, index);
+            RadixControls.Children.Add(container);
         }
-        var inputOptions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        _numberMode.Content = Icon("\uE75F");
-        _bitMode.Content = Icon("\uF7D0");
+        foreach (var width in new[] { new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star), MaxWidth = 160 },
+            new ColumnDefinition { Width = new GridLength(0.01, GridUnitType.Star) },
+            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 80 },
+            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 80 },
+            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 80 } }) InputControls.ColumnDefinitions.Add(width);
+        var inputModes = new Grid();
+        inputModes.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inputModes.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _numberMode.Content = Icon("\uE75F"); _bitMode.Content = Icon("\uF7D0");
+        _numberIndicator.Visibility = Visibility.Visible;
+        foreach (var entry in new[] { (_numberMode, _numberIndicator, 0), (_bitMode, _bitIndicator, 1) })
+        {
+            var tile = new Grid(); tile.Children.Add(entry.Item1); tile.Children.Add(entry.Item2);
+            Grid.SetColumn(tile, entry.Item3); inputModes.Children.Add(tile);
+        }
         AutomationProperties.SetName(_numberMode, "Number input");
         AutomationProperties.SetName(_bitMode, "Bit input");
         AutomationProperties.SetAutomationId(_numberMode, "fullKeypad");
         AutomationProperties.SetAutomationId(_bitMode, "bitFlip");
-        ToolTipService.SetToolTip(_numberMode, "Number input");
-        ToolTipService.SetToolTip(_bitMode, "Bit input");
-        _numberMode.Checked += (_, _) => SelectInput(false);
-        _bitMode.Checked += (_, _) => SelectInput(true);
-        inputOptions.Children.Add(_numberMode);
-        inputOptions.Children.Add(_bitMode);
+        ToolTipService.SetToolTip(_numberMode, "Number input"); ToolTipService.SetToolTip(_bitMode, "Bit input");
+        _numberMode.Click += (_, _) => SelectInput(false); _bitMode.Click += (_, _) => SelectInput(true);
+        InputControls.Children.Add(inputModes);
         AutomationProperties.SetName(_wordWidth, "Cycle word size");
         _wordWidth.Click += (_, _) => CycleWordWidth();
-        inputOptions.Children.Add(_wordWidth);
-        var wordMenuButton = new Button { Content = new FontIcon { Glyph = "\uE70D", FontSize = 12 }, Flyout = _wordMenu, MinHeight = 36 };
-        AutomationProperties.SetName(wordMenuButton, "Choose word size");
-        inputOptions.Children.Add(wordMenuButton);
-        Children.Add(inputOptions);
-
-        var operators = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        _wordWidth.ContextFlyout = _wordMenu;
+        Grid.SetColumn(_wordWidth, 2); InputControls.Children.Add(_wordWidth);
+        _memoryStore.Content = new TextBlock { Text = "MS", FontSize = 12 };
+        AutomationProperties.SetName(_memoryStore, "Memory store");
+        _memoryStore.Click += (_, _) => Invoke(_snapshot?.MemoryButtons.FirstOrDefault(button => button.Title == "MS"));
+        Grid.SetColumn(_memoryStore, 3); InputControls.Children.Add(_memoryStore);
+        var memoryLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        memoryLabel.Children.Add(new TextBlock { Text = "M", FontSize = 12 });
+        memoryLabel.Children.Add(new FontIcon { Glyph = "\uE70D", FontSize = 8, VerticalAlignment = VerticalAlignment.Center });
+        _memoryList.Content = memoryLabel;
+        _memoryList.Resources["ButtonBackgroundDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        _memoryStore.Resources["ButtonBackgroundDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        AutomationProperties.SetName(_memoryList, "Show stored memory");
+        _memoryList.Click += (_, _) => MemoryRequested?.Invoke();
+        Grid.SetColumn(_memoryList, 4); InputControls.Children.Add(_memoryList);
+        var operators = new StackPanel { Orientation = Orientation.Horizontal, Height = 40, BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 128, 128, 128)) };
         operators.Children.Add(CreatePopup("Bitwise", "\uF895", _bitwiseFlyout));
         operators.Children.Add(CreatePopup("Bit shift", "\uE301", _shiftFlyout));
         for (var index = 0; index < _shiftButtons.Length; index++)
         {
             var direction = index;
-            var button = new Button { Content = Icon(index == 0 ? "\uF88E" : "\uF88F"), MinWidth = 42, MinHeight = 36 };
+            var button = new Button { Content = Icon(index == 0 ? "\uF88E" : "\uF88F"), Style = (Style)Application.Current.Resources["CalculatorKey"], Margin = new Thickness(1), MinHeight = 28, Padding = new Thickness(2) };
             button.Click += (_, _) => InvokeShift(direction);
             _shiftButtons[index] = button;
-            operators.Children.Add(button);
         }
         Children.Add(operators);
         _bitwiseFlyout.Content = _bitwiseTiles;
@@ -112,7 +150,7 @@ public sealed class ProgrammerOptionsPanel : StackPanel
         _shiftFlyout.Content = _shiftOptions;
         for (var row = 0; row < 4; row++) _bits.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         for (var column = 0; column < 16; column++) _bits.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        Children.Add(_bits);
+
         IsHitTestVisible = false;
     }
 
@@ -145,7 +183,7 @@ public sealed class ProgrammerOptionsPanel : StackPanel
             {
                 var specification = snapshot.BaseButtons.ElementAtOrDefault(index);
                 _baseRows[index].IsEnabled = specification?.Enabled == true;
-                _baseRows[index].IsChecked = snapshot.Radix == Radices[index];
+                _baseIndicators[index].Visibility = snapshot.Radix == Radices[index] ? Visibility.Visible : Visibility.Collapsed;
                 _baseValues[index].Text = snapshot.RadixDisplays.FirstOrDefault(display => display.Radix == Radices[index])?.Value ?? "";
                 AutomationProperties.SetName(_baseRows[index], $"{specification?.Title}, {_baseValues[index].Text}");
             }
@@ -153,6 +191,8 @@ public sealed class ProgrammerOptionsPanel : StackPanel
             _wordWidth.Content = word?.Title ?? $"{snapshot.WordWidth} bits";
             _wordWidth.IsEnabled = word?.Enabled == true;
             ToolTipService.SetToolTip(_wordWidth, $"{snapshot.WordWidth} bits. Select to cycle word size.");
+            _memoryStore.IsEnabled = snapshot.MemoryButtons.FirstOrDefault(button => button.Title == "MS")?.Enabled == true;
+            _memoryList.IsEnabled = snapshot.Memory.Count > 0;
             RefreshWordMenu();
             RefreshBitwise();
             RefreshShift();
@@ -161,15 +201,15 @@ public sealed class ProgrammerOptionsPanel : StackPanel
         finally { _updating = false; }
     }
 
-    private FontIcon Icon(string glyph) => new() { Glyph = glyph, FontFamily = _icons, FontSize = 20, IsHitTestVisible = false };
+    private FontIcon Icon(string glyph) => new() { Glyph = glyph, FontFamily = _icons, FontSize = 16, IsHitTestVisible = false };
 
     private Button CreatePopup(string title, string glyph, Flyout flyout)
     {
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         label.Children.Add(Icon(glyph));
-        label.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center });
+        label.Children.Add(new TextBlock { Text = title, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
         label.Children.Add(new FontIcon { Glyph = "\uE70D", FontSize = 10, IsHitTestVisible = false });
-        var button = new Button { Content = label, Flyout = flyout, MinHeight = 36, Padding = new Thickness(6, 4, 6, 4) };
+        var button = SubtleButton(); button.Content = label; button.Flyout = flyout; button.Padding = new Thickness(10, 0, 10, 0);
         AutomationProperties.SetName(button, title);
         return button;
     }
@@ -188,6 +228,8 @@ public sealed class ProgrammerOptionsPanel : StackPanel
         if (_updating || IsBitFlipSelected == bits) return;
         IsBitFlipSelected = bits;
         _bits.Visibility = bits ? Visibility.Visible : Visibility.Collapsed;
+        _numberIndicator.Visibility = bits ? Visibility.Collapsed : Visibility.Visible;
+        _bitIndicator.Visibility = bits ? Visibility.Visible : Visibility.Collapsed;
         BitModeChanged?.Invoke(bits);
     }
 
@@ -244,6 +286,11 @@ public sealed class ProgrammerOptionsPanel : StackPanel
         {
             var specification = FindCommand(ShiftTitles[_shiftMode][direction]);
             _shiftButtons[direction].IsEnabled = specification?.Enabled == true;
+            _shiftButtons[direction].Content = _shiftMode == 0
+                ? new FontIcon { Glyph = direction == 0 ? "\uF88E" : "\uF88F", FontFamily = _icons, FontSize = 14 }
+                : new TextBlock { Text = ShiftTitles[_shiftMode][direction], FontSize = 14 };
+            var theme = ActualTheme == ElementTheme.Light ? "Light" : "Dark";
+            _shiftButtons[direction].Background = (Brush)((ResourceDictionary)Application.Current.Resources.ThemeDictionaries[theme])["CalculatorOperationBackground"];
             var name = $"{ShiftNames[_shiftMode]}, {(direction == 0 ? "left" : "right")}";
             AutomationProperties.SetName(_shiftButtons[direction], name);
             ToolTipService.SetToolTip(_shiftButtons[direction], name);
@@ -302,15 +349,15 @@ public sealed class ProgrammerOptionsPanel : StackPanel
             if (BitCount != 64 || _bitButtons.Count(button => button.IsEnabled) != original.WordWidth)
                 throw new InvalidOperationException("Bit controls do not match the word size.");
             stage = "radix selection";
-            _baseRows[0].IsChecked = true;
-            if (_snapshot?.Radix != 16 || _baseRows[0].IsChecked != true) throw new InvalidOperationException("HEX selection was not reflected.");
+            InvokeButton(_baseRows[0]);
+            if (_snapshot?.Radix != 16 || _baseIndicators[0].Visibility != Visibility.Visible) throw new InvalidOperationException("HEX selection was not reflected.");
             stage = "word size cycle";
             var nextWidth = WordWidths[(Array.IndexOf(WordWidths, _snapshot!.WordWidth) + 1) % WordWidths.Length];
             InvokeButton(_wordWidth);
             if (_snapshot?.WordWidth != nextWidth || _bitButtons.Count(button => button.IsEnabled) != nextWidth)
                 throw new InvalidOperationException("Word-size selection was not reflected.");
             stage = "bit input";
-            _bitMode.IsChecked = true;
+            InvokeButton(_bitMode);
             if (!IsBitFlipSelected || _bits.Visibility != Visibility.Visible) throw new InvalidOperationException("Bit input was not shown.");
             var previousBit = _snapshot!.BitButtons[63].Title;
             InvokeButton(_bitButtons[63]);
@@ -319,7 +366,7 @@ public sealed class ProgrammerOptionsPanel : StackPanel
             _shiftModes[1].IsChecked = true;
             if (_shiftMode != 1 || !_shiftButtons[1].IsEnabled) throw new InvalidOperationException("Logical shift was not enabled.");
             stage = "number input";
-            _numberMode.IsChecked = true;
+            InvokeButton(_numberMode);
             if (IsBitFlipSelected || _bits.Visibility != Visibility.Collapsed) throw new InvalidOperationException("Number input was not restored.");
             return true;
         }
@@ -340,10 +387,24 @@ public sealed class ProgrammerOptionsPanel : StackPanel
                 Invoke(_snapshot?.BaseButtons.ElementAtOrDefault(Array.IndexOf(Radices, original.Radix)));
             }
             _shiftModes[originalShift].IsChecked = true;
-            if (originalInput) _bitMode.IsChecked = true;
-            else _numberMode.IsChecked = true;
+            SelectInput(originalInput);
         }
     }
+
+    public void SetDocked(bool docked) => _memoryList.Visibility = docked ? Visibility.Collapsed : Visibility.Visible;
+
+    private static Button SubtleButton() => new()
+    {
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0),
+        MinWidth = 0, MinHeight = 28, Padding = new Thickness(4), HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Stretch, FontSize = 12
+    };
+    private static Border Indicator() => new()
+    {
+        Background = (Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"], Width = 16, Height = 3,
+        CornerRadius = new CornerRadius(2), VerticalAlignment = VerticalAlignment.Bottom,
+        HorizontalAlignment = HorizontalAlignment.Center, Visibility = Visibility.Collapsed, IsHitTestVisible = false
+    };
 
     private static void InvokeButton(Button button)
     {

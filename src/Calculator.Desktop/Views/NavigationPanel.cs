@@ -7,10 +7,13 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Dispatching;
+using System.Diagnostics;
+using Windows.Foundation;
 
 namespace CalculatorApp.Desktop;
 
-public sealed class NavigationPanel : NavigationView
+public sealed class NavigationPanel : Grid
 {
     // NavCategory.CategoryManifest glyphs, in the native adapter's converter order.
     private static readonly string[] CategoryGlyphs =
@@ -23,6 +26,51 @@ public sealed class NavigationPanel : NavigationView
     private readonly Action<int> _selectMode;
     private readonly Action<int> _selectCategory;
     private readonly Action _showSettings;
+
+    private readonly NavigationView _menu = new()
+    {
+        PaneDisplayMode = NavigationViewPaneDisplayMode.Left,
+        IsPaneOpen = true, IsPaneToggleButtonVisible = false,
+        IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
+        OpenPaneLength = 256, Width = 256, IsSettingsVisible = true
+    };
+    private readonly ContentPresenter _content = new();
+    private readonly Grid _overlay = new() { Opacity = 0, IsHitTestVisible = false };
+    private readonly TranslateTransform _offset = new() { X = -256 };
+    private readonly Button _toggle = CreateToggle();
+    private readonly Border _dismiss = new() { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
+    private readonly DispatcherQueueTimer _transition = DispatcherQueue.GetForCurrentThread().CreateTimer();
+    private long _transitionStarted;
+    private double _transitionFrom;
+    private bool _open;
+    private bool _settings;
+    public UIElement? Content { get => _content.Content as UIElement; set => _content.Content = value; }
+    public bool IsPaneOpen { get => _open; set => SetPaneOpen(value); }
+    public void SetSettingsMode(bool settings) { _settings = settings; _toggle.Content = new FontIcon { Glyph = settings ? "\uE72B" : "\uE700", FontSize = settings ? 16 : 12 }; AutomationProperties.SetName(_toggle, settings ? "Back" : "Open navigation"); }
+    public event Action? BackRequested;
+
+    private static Button CreateToggle() => new()
+    {
+        Content = new FontIcon { Glyph = "\uE700", FontSize = 12 }, Width = 48, Height = 48,
+        Padding = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0),
+        HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top
+    };
+
+    private void SetPaneOpen(bool open)
+    {
+        if (_open == open) return;
+        _open = open;
+        // Keep the pane measured offscreen. Visibility/layout changes between the
+        // SplitView's keyframes otherwise expose its untranslated first frame.
+        _transition.Stop();
+        _transitionFrom = _offset.X;
+        _transitionStarted = Stopwatch.GetTimestamp();
+        _overlay.Opacity = 1;
+        _overlay.IsHitTestVisible = open;
+        if (open) _menu.IsEnabled = true;
+        _transition.Start();
+        AutomationProperties.SetName(_toggle, open ? "Close navigation" : "Open navigation");
+    }
 
     private enum EntryKind { Mode, Category }
     private readonly record struct Entry(EntryKind Kind, int Index = 0);
@@ -47,28 +95,59 @@ public sealed class NavigationPanel : NavigationView
         _selectCategory = selectCategory;
         ArgumentNullException.ThrowIfNull(showSettings);
         _showSettings = showSettings;
-        OpenPaneLength = 256;
-        PaneDisplayMode = NavigationViewPaneDisplayMode.LeftMinimal;
-        IsPaneOpen = false;
-        IsPaneToggleButtonVisible = true;
-        IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
-        IsSettingsVisible = true;
+        _transition.Interval = TimeSpan.FromMilliseconds(16);
+        _transition.Tick += (_, _) =>
+        {
+            double progress = Math.Clamp(Stopwatch.GetElapsedTime(_transitionStarted).TotalMilliseconds / 350, 0, 1);
+            double eased = 1 - Math.Pow(1 - progress, 3);
+            _offset.X = _transitionFrom + ((_open ? 0 : -256) - _transitionFrom) * eased;
+            if (progress >= 1) { _transition.Stop(); _overlay.Opacity = _open ? 1 : 0; _menu.IsEnabled = _open; }
+        };
+        Unloaded += (_, _) => _transition.Stop();
+        _menu.IsEnabled = false;
+        Children.Add(_content);
+        Children.Add(_toggle);
+        Children.Add(_overlay);
+        _overlay.Children.Add(_dismiss);
+        var drawer = new Grid { Width = 256, HorizontalAlignment = HorizontalAlignment.Left, RenderTransform = _offset };
+        drawer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+        drawer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var close = CreateToggle();
+        AutomationProperties.SetName(close, "Close navigation");
+        close.Click += (_, _) => IsPaneOpen = false;
+        drawer.Children.Add(close);
+        Grid.SetRow(_menu, 1);
+        drawer.Children.Add(_menu);
+        _overlay.Children.Add(drawer);
+        _dismiss.PointerPressed += (_, _) => IsPaneOpen = false;
+        _toggle.Click += (_, _) => { if (_settings) BackRequested?.Invoke(); else IsPaneOpen = !IsPaneOpen; };
+        void RefreshBackground()
+        {
+            var theme = ActualTheme == ElementTheme.Light ? "Light" : "Dark";
+            var resources = (ResourceDictionary)Application.Current.Resources.ThemeDictionaries[theme];
+            drawer.Background = (Brush)resources["CalculatorBackground"];
+            _menu.Background = drawer.Background;
+            _menu.Resources["NavigationViewDefaultPaneBackground"] = drawer.Background;
+        }
+        Loaded += (_, _) => RefreshBackground();
+        ActualThemeChanged += (_, _) => RefreshBackground();
+        SizeChanged += (_, args) => Clip = new RectangleGeometry { Rect = new Rect(0, 0, args.NewSize.Width, args.NewSize.Height) };
         AutomationProperties.SetName(this, "Calculator modes and converters");
 
-        MenuItems.Add(CreateHeading("Calculator"));
-        MenuItems.Add(CreateItem("Standard", "\uE8EF", new Entry(EntryKind.Mode, 0)));
-        MenuItems.Add(CreateItem("Scientific", "\uF196", new Entry(EntryKind.Mode, 1)));
+        _menu.MenuItems.Add(CreateHeading("Calculator"));
+        _menu.MenuItems.Add(CreateItem("Standard", "\uE8EF", new Entry(EntryKind.Mode, 0)));
+        _menu.MenuItems.Add(CreateItem("Scientific", "\uF196", new Entry(EntryKind.Mode, 1)));
         var graphing = CreateItem("Graphing", "\uF770", new Entry(EntryKind.Mode, 5));
         graphing.IsEnabled = graphingEnabled;
-        MenuItems.Add(graphing);
-        MenuItems.Add(CreateItem("Programmer", "\uECCE", new Entry(EntryKind.Mode, 2)));
-        MenuItems.Add(CreateItem("Date calculation", "\uE787", new Entry(EntryKind.Mode, 4)));
-        MenuItems.Add(CreateHeading("Converter"));
-        MenuItems.Add(CreateItem(categories[CategoryGlyphs.Length], "\uEB0D", new Entry(EntryKind.Category, CategoryGlyphs.Length)));
+        _menu.MenuItems.Add(graphing);
+        _menu.MenuItems.Add(CreateItem("Programmer", "\uECCE", new Entry(EntryKind.Mode, 2)));
+        _menu.MenuItems.Add(CreateItem("Date calculation", "\uE787", new Entry(EntryKind.Mode, 4)));
+        _menu.MenuItems.Add(CreateHeading("Converter"));
+        _menu.MenuItems.Add(CreateItem(categories[CategoryGlyphs.Length], "\uEB0D", new Entry(EntryKind.Category, CategoryGlyphs.Length)));
         for (var index = 0; index < CategoryGlyphs.Length; index++)
-            MenuItems.Add(CreateItem(categories[index], CategoryGlyphs[index], new Entry(EntryKind.Category, index)));
+            _menu.MenuItems.Add(CreateItem(categories[index], CategoryGlyphs[index], new Entry(EntryKind.Category, index)));
 
-        ItemInvoked += OnItemInvoked;
+        _menu.ItemInvoked += OnItemInvoked;
     }
 
     private static NavigationViewItemHeader CreateHeading(string title)
@@ -119,47 +198,60 @@ public sealed class NavigationPanel : NavigationView
 
     internal void SelectView(int mode, int category)
     {
-        if (mode == 6) { SelectedItem = SettingsItem; return; }
-        foreach (var item in MenuItems)
+        if (mode == 6) { _menu.SelectedItem = _menu.SettingsItem; return; }
+        foreach (var item in _menu.MenuItems)
             if (item is NavigationViewItem { Tag: Entry entry } navigationItem
                 && (mode == 3 ? entry.Kind == EntryKind.Category && entry.Index == category
                     : entry.Kind == EntryKind.Mode && entry.Index == mode))
             {
-                SelectedItem = navigationItem;
+                _menu.SelectedItem = navigationItem;
                 return;
             }
     }
 
     internal async System.Threading.Tasks.Task RunSmokeChecksAsync()
     {
-        ApplyTemplate();
         UpdateLayout();
-        var toggle = FindToggle(this) ?? throw new InvalidOperationException("Navigation has no pane toggle button.");
         var content = Content as FrameworkElement ?? throw new InvalidOperationException("Navigation has no content.");
-        var before = content.TransformToVisual(this).TransformPoint(new Windows.Foundation.Point());
+        var before = content.TransformToVisual(this).TransformPoint(new Point());
         for (var cycle = 0; cycle < 3; cycle++)
         {
-            var peer = new ButtonAutomationPeer(toggle);
-            if (peer.GetPattern(PatternInterface.Invoke) is not IInvokeProvider provider)
-                throw new InvalidOperationException("Navigation toggle has no invoke provider.");
-            provider.Invoke();
-            await System.Threading.Tasks.Task.Delay(300);
-            UpdateLayout();
-            if (!IsPaneOpen) throw new InvalidOperationException("Navigation closed immediately after opening.");
-            var after = content.TransformToVisual(this).TransformPoint(new Windows.Foundation.Point());
-            if (Math.Abs(before.X - after.X) > 1 || Math.Abs(before.Y - after.Y) > 1)
-                throw new InvalidOperationException("Navigation moved calculator content instead of overlaying it.");
-            provider.Invoke();
-            await System.Threading.Tasks.Task.Delay(300);
-            if (IsPaneOpen) throw new InvalidOperationException("Navigation did not close after a second click.");
+            InvokeToggle();
+            double previous = -256;
+            bool moved = false;
+            for (var frame = 0; frame < 26; frame++)
+            {
+                await System.Threading.Tasks.Task.Delay(16);
+                UpdateLayout();
+                double current = _offset.X;
+                if (current < previous - 1 || current > 1 || current < -257)
+                    throw new InvalidOperationException("Navigation jumped during its opening transition.");
+                moved |= current > -255 && current < -1;
+                previous = current;
+                var position = content.TransformToVisual(this).TransformPoint(new Point());
+                if (Math.Abs(before.X - position.X) > 1 || Math.Abs(before.Y - position.Y) > 1)
+                    throw new InvalidOperationException("Navigation moved calculator content during its transition.");
+            }
+            if (!IsPaneOpen || !moved || Math.Abs(_offset.X) > 1)
+                throw new InvalidOperationException("Navigation did not smoothly open.");
+            InvokeToggle();
+            await System.Threading.Tasks.Task.Delay(400);
+            if (IsPaneOpen || Math.Abs(_offset.X + 256) > 1 || _overlay.IsHitTestVisible)
+                throw new InvalidOperationException("Navigation did not close after a second click.");
         }
+        InvokeToggle();
+        await System.Threading.Tasks.Task.Delay(50);
+        InvokeToggle();
+        await System.Threading.Tasks.Task.Delay(400);
+        if (IsPaneOpen || Math.Abs(_offset.X + 256) > 1)
+            throw new InvalidOperationException("Navigation failed to reverse an interrupted transition.");
     }
 
-    private static Button? FindToggle(DependencyObject element)
+    private void InvokeToggle()
     {
-        if (element is Button { Name: "TogglePaneButton" or "PaneToggleButton" } toggle) return toggle;
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(element); index++)
-            if (FindToggle(VisualTreeHelper.GetChild(element, index)) is { } match) return match;
-        return null;
+        var peer = new ButtonAutomationPeer(_toggle);
+        if (peer.GetPattern(PatternInterface.Invoke) is not IInvokeProvider provider)
+            throw new InvalidOperationException("Navigation toggle has no invoke provider.");
+        provider.Invoke();
     }
 }

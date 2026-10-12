@@ -22,14 +22,11 @@ public sealed partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         window = new Window { Title = "Calculator" };
-        if (window.AppWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.PreferredMinimumWidth = 320;
-            presenter.PreferredMinimumHeight = 500;
-        }
-        window.AppWindow.Resize(new SizeInt32 { Width = 420, Height = 680 });
+        WindowAppearance.ApplyMinimumContentSize(window);
+        WindowAppearance.ResizeContent(window, new SizeInt32 { Width = 420, Height = 680 });
         var page = new CalculatorPage(window);
         window.Content = page;
+        page.Loaded += (_, _) => WindowAppearance.ApplyMinimumContentSize(window);
         window.SetWindowIcon();
         if (OperatingSystem.IsWindows())
             page.Loaded += (_, _) => window.AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "Calculator.ico"));

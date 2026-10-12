@@ -2,6 +2,8 @@
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using Windows.UI;
+using Windows.Graphics;
+using Microsoft.UI.Windowing;
 using Uno.UI.NativeElementHosting;
 using Uno.UI.Xaml;
 
@@ -9,6 +11,31 @@ namespace CalculatorApp.Desktop;
 
 internal static partial class WindowAppearance
 {
+    // AppWindow.Resize includes Win32's frame, while the other hosts resize the
+    // content. Keep the shared layout and minimums in content coordinates.
+    public static void ResizeContent(Window window, SizeInt32 content)
+    {
+        var frame = FrameInsets(window);
+        window.AppWindow.Resize(new SizeInt32 { Width = content.Width + frame.Width, Height = content.Height + frame.Height });
+    }
+
+    public static void ApplyMinimumContentSize(Window window)
+    {
+        if (window.AppWindow.Presenter is not OverlappedPresenter presenter) return;
+        var frame = FrameInsets(window);
+        presenter.PreferredMinimumWidth = 320 + frame.Width;
+        presenter.PreferredMinimumHeight = 500 + frame.Height;
+    }
+
+    private static SizeInt32 FrameInsets(Window window)
+    {
+        if (!OperatingSystem.IsWindows()) return new SizeInt32();
+        var handle = (WindowHelper.GetNativeWindow(window) as Win32NativeWindow)?.Hwnd ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var outer) || !GetClientRect(handle, out var client)) return new SizeInt32();
+        return new SizeInt32 { Width = Math.Max(0, outer.Right - outer.Left - client.Right + client.Left),
+            Height = Math.Max(0, outer.Bottom - outer.Top - client.Bottom + client.Top) };
+    }
+
     public static bool ApplyTheme(Window window, ElementTheme theme, Color background)
     {
         if (!OperatingSystem.IsWindows()) return true;
@@ -26,6 +53,16 @@ internal static partial class WindowAppearance
             Console.Error.WriteLine($"Window theme: handle={handle}, dark={dark}, caption={caption:X6}, HRESULT={darkResult:X8}/{captionResult:X8}");
         return darkResult >= 0 && captionResult >= 0;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowRect(IntPtr window, out NativeRect rectangle);
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetClientRect(IntPtr window, out NativeRect rectangle);
 
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmSetWindowAttribute(IntPtr window, uint attribute, ref uint value, uint size);

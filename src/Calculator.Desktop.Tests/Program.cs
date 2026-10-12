@@ -75,6 +75,8 @@ internal static class Program
         Check(calculator.GetSnapshot().Converted.StartsWith("3.280", StringComparison.Ordinal), "Meters-to-feet conversion failed");
         Check(!calculator.SetUnits(-1, feet), "Invalid converter unit accepted");
         Check(calculator.GetSnapshot().Categories.Count == 13, "All converter categories must be available");
+        Check(!calculator.GetSnapshot().SupportsNegative, "Length must hide the converter sign key");
+        Check(calculator.SetCategory(3) && calculator.GetSnapshot().SupportsNegative, "Temperature must allow signed converter input");
         Check(calculator.SetCategory(12), calculator.LastError);
         Check(!calculator.GetSnapshot().Currency.Available && !calculator.PasteNumber("1"), "Unloaded currency rates must not yield a fake conversion");
         Check(calculator.SetCurrencyRates(1, "2026-10-09", "2026-10-12", "2026-10-12T12:00:00Z",
@@ -83,6 +85,8 @@ internal static class Program
         int dollars = currencies.Units.ToList().IndexOf("USD"), euros = currencies.Units.ToList().IndexOf("EUR");
         Check(calculator.SetUnits(euros, dollars) && calculator.PasteNumber("1"), calculator.LastError);
         Check(calculator.GetSnapshot().Converted.StartsWith("1.1218", StringComparison.Ordinal), "Currency direction/rate precision was lost");
+        Check(Math.Abs(calculator.GetSnapshot().CurrencyRatio - 1.1218) < 1e-12 && !calculator.GetSnapshot().SupportsNegative,
+            "Displayed currency ratio or sign-key visibility was lost");
         Check(calculator.GetSnapshot().Currency.ReferenceEndDate == "2026-10-12"
             && calculator.GetSnapshot().Currency.ProviderId == 1, "Currency provider/date range was lost across interop");
         Check(!calculator.SetCurrencyRates(1, "2026-10-13", "2026-10-12", "2026-10-12T12:00:00Z", "EUR=1\nUSD=0", false),

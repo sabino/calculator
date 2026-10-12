@@ -31,6 +31,8 @@ public sealed record CalculatorSnapshot(int Mode, string Primary, string Express
 {
     public IReadOnlyList<CalculatorButton> BitButtons { get; init; } = Array.Empty<CalculatorButton>();
     public IReadOnlyList<CalculatorRadixDisplay> RadixDisplays { get; init; } = Array.Empty<CalculatorRadixDisplay>();
+    public bool SupportsNegative { get; init; }
+    public double CurrencyRatio { get; init; }
     public bool ScientificShift { get; init; }
     public bool ScientificFormat { get; init; }
     public CalculatorButton? ScientificFormatButton { get; init; }
@@ -70,7 +72,11 @@ public sealed record GraphStroke(IReadOnlyList<GraphPoint> Points, string Color,
 public sealed record GraphFill(IReadOnlyList<GraphPoint> Points, string Color);
 public sealed record GraphLabel(double X, double Y, string Text, string Color);
 public sealed record GraphScene(int Width, int Height, string Background, IReadOnlyList<GraphStroke> Strokes,
-    IReadOnlyList<GraphFill> Fills, IReadOnlyList<GraphLabel> Labels, bool HasMissingData);
+    IReadOnlyList<GraphFill> Fills, IReadOnlyList<GraphLabel> Labels, bool HasMissingData)
+{
+    public GraphRange? Range { get; init; }
+    public GraphSettings? Settings { get; init; }
+}
 public sealed record GraphTrace(int Row, double X, double Y, double ScreenX, double ScreenY, double? Rho, double? Theta, double? T);
 
 internal static class BridgeJson
@@ -318,7 +324,15 @@ public sealed class NativeGraph : IDisposable
         return true;
     }
     public GraphSnapshot GetSnapshot() => Read<GraphSnapshot>(() => NativeMethods.calc_graph_get_state(handle), true)!;
-    public GraphScene GetScene(int width, int height) => Read<GraphScene>(() => NativeMethods.calc_graph_get_scene(handle, width, height), true)!;
+    public GraphScene GetScene(int width, int height)
+    {
+        lock (gate)
+        {
+            var state = GetSnapshot();
+            return Read<GraphScene>(() => NativeMethods.calc_graph_get_scene(handle, width, height), true)!
+                with { Range = state.Range, Settings = state.Settings };
+        }
+    }
     public bool SetParameter(int row, string name, double value) => ApplyText(name, () => NativeMethods.calc_graph_set_parameter(handle, row, name, value));
     public bool SetVisible(int row, bool visible) => Apply(() => NativeMethods.calc_graph_set_visible(handle, row, visible ? 1 : 0));
     public bool SetSelected(int row) => Apply(() => NativeMethods.calc_graph_set_selected(handle, row));

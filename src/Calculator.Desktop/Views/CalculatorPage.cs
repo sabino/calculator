@@ -25,6 +25,20 @@ public sealed class CalculatorPage : Page
     private readonly NativeCalculator calculator = new();
     private readonly Grid root = new() { Margin = new Thickness(3, 0, 3, 0) };
     private readonly Grid body = new();
+    private readonly Grid dock = new() { Visibility = Visibility.Collapsed, Margin = new Thickness(12, 0, 12, 0) };
+    private Grid? header;
+    private UIElement? graphHeader;
+    private int previousMode;
+    private bool appearanceExpanded;
+    private bool aboutExpanded;
+    private readonly List<RadioButton> themeOptions = [];
+    private bool docked;
+    private bool memorySelected;
+    private string dockRevision = "";
+    private readonly TextBlock fromSymbol = new() { FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.Light, Margin = new Thickness(0, 0, 14, 4), VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly TextBlock toSymbol = new() { FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.Light, Margin = new Thickness(0, 0, 14, 4), VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly TextBlock rateEquality = new() { FontSize = 12, Opacity = 0.75 };
+    private readonly TextBlock rateTimestamp = new() { FontSize = 12, Opacity = 0.75 };
     private readonly TextBlock heading = new() { FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, -3, 0, 0) };
     private TextBlock result = new();
     private TextBlock expression = new();
@@ -78,19 +92,37 @@ public sealed class CalculatorPage : Page
         snapshot = calculator.GetSnapshot();
         navigation = new NavigationPanel(snapshot.Categories, calculator.GetAbout().GraphingEnabled, SetMode, SetCategory, () => SetMode(6));
         navigation.Content = root;
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0), MaxWidth = 320 });
+        navigation.BackRequested += () => SetMode(previousMode);
+        root.SizeChanged += (_, _) => UpdateDockLayout();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.Children.Add(CreateHeader());
+        header = CreateHeader();
+        root.Children.Add(header);
         Grid.SetRow(body, 1);
         root.Children.Add(body);
+        Grid.SetColumn(dock, 1); Grid.SetRowSpan(dock, 2);
+        root.Children.Add(dock);
         Grid.SetRow(notice, 2);
         root.Children.Add(notice);
         Content = navigation;
         KeyDown += OnKeyDown;
-        ActualThemeChanged += (_, _) => BuildBody();
+        ActualThemeChanged += (_, _) =>
+        {
+            // Preserve the theme radio group during its Checked event. Replacing
+            // it synchronously lets the old group undo the new selection.
+            if (viewMode == 6) ApplyThemeResources();
+            else BuildBody();
+        };
         window.Activated += (_, _) => ApplyWindowTheme();
         SetMode(Program.InitialMode);
+        if (Program.InitialMode == 3)
+        {
+            var index = snapshot.Categories.ToList().FindIndex(name => name.Equals(Program.InitialView, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0) SetCategory(index);
+        }
         Loaded += async (_, _) =>
         {
             ApplyWindowTheme();
@@ -154,12 +186,14 @@ public sealed class CalculatorPage : Page
     private void SetMode(int mode)
     {
         if (mode <= 4 && !calculator.SetMode(mode)) { ShowError(calculator.LastError); return; }
+        if (mode == 6 && viewMode != 6) previousMode = viewMode;
         viewMode = mode;
+        navigation.SetSettingsMode(mode == 6);
         heading.Text = mode switch
         {
             1 => "Scientific", 2 => "Programmer", 3 => snapshot.Categories[snapshot.CategoryIndex], 4 => "Date calculation", 5 => "Graphing", 6 => "Settings", _ => "Standard"
         };
-        details.IsEnabled = mode < 3;
+        details.IsEnabled = mode < 2;
         keepOnTop.Visibility = mode == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (mode != 0 && keepOnTop.IsChecked == true)
         {
@@ -184,6 +218,14 @@ public sealed class CalculatorPage : Page
             && WindowAppearance.ApplyTheme(window, ActualTheme, background.Color);
     }
 
+    private void ApplyThemeResources()
+    {
+        Background = GetBrush("CalculatorBackground");
+        navigation.Background = Background;
+        root.Background = Background;
+        ApplyWindowTheme();
+    }
+
     private void BuildBody()
     {
         refreshing = true;
@@ -195,10 +237,9 @@ public sealed class CalculatorPage : Page
         numberKeypad = null;
         memoryDropdown = null;
         scientificSize = 0;
-        Background = GetBrush("CalculatorBackground");
-        navigation.Background = Background;
-        root.Background = Background;
-        ApplyWindowTheme();
+        if (graphHeader is not null) { header?.Children.Remove(graphHeader); graphHeader = null; }
+        UpdateDockLayout();
+        ApplyThemeResources();
         notice.Text = "";
         notice.Visibility = Visibility.Collapsed;
         try
@@ -213,6 +254,9 @@ public sealed class CalculatorPage : Page
                 graph ??= new NativeGraph();
                 graphPanel ??= new GraphPanel(graph);
                 body.Children.Add(graphPanel);
+                graphHeader = graphPanel.ViewToggle;
+                Grid.SetColumn(graphHeader, 2); Grid.SetColumnSpan(graphHeader, 2);
+                header!.Children.Add(graphHeader);
                 return;
             }
             if (viewMode == 4)
@@ -221,45 +265,43 @@ public sealed class CalculatorPage : Page
                 body.Children.Add(datePanel);
                 return;
             }
-            var controls = new StackPanel { Spacing = 8 };
+            if (viewMode == 3) { BuildConverter(); return; }
             result = new TextBlock { FontSize = 46, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, IsTextSelectionEnabled = true };
             expression = new TextBlock { HorizontalAlignment = HorizontalAlignment.Right, Opacity = 0.7 };
             converted = new TextBlock { FontSize = 30, IsTextSelectionEnabled = true };
             result.ContextFlyout = CreateClipboardMenu(() => snapshot.Primary, true);
             expression.ContextFlyout = CreateClipboardMenu(() => snapshot.Expression, false);
             converted.ContextFlyout = CreateClipboardMenu(() => snapshot.Converted, false);
-            if (viewMode == 3) BuildConverter(controls);
-            else BuildCalculatorOptions(controls);
-            bool calculatorLayout = viewMode is 0 or 1;
-            body.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout ? new GridLength(92, GridUnitType.Star) : GridLength.Auto });
-            body.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout
-                ? viewMode == 1 ? new GridLength(32, GridUnitType.Star) : GridLength.Auto
-                : new GridLength(1, GridUnitType.Star), MinHeight = viewMode == 1 ? 32 : 0 });
-            body.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout ? new GridLength(32, GridUnitType.Star) : GridLength.Auto, MinHeight = 32 });
-            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(calculatorLayout ? viewMode == 1 ? 276 : 308 : 3, GridUnitType.Star) });
+            BuildCalculatorOptions();
+            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(92, GridUnitType.Star) });
+            body.RowDefinitions.Add(new RowDefinition { Height = viewMode == 1 ? new GridLength(32, GridUnitType.Star) : viewMode == 2 ? new GridLength(96, GridUnitType.Star) : GridLength.Auto, MinHeight = viewMode == 1 ? 32 : viewMode == 2 ? 96 : 0 });
+            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32, GridUnitType.Star), MinHeight = 32 });
+            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(viewMode == 1 ? 276 : viewMode == 2 ? 268 : 308, GridUnitType.Star) });
             if (scientificOptions is not null)
             {
                 Grid.SetRow(scientificOptions.AngleControls, 1);
                 body.Children.Add(scientificOptions.AngleControls);
             }
-            else body.Children.Add(controls);
+            else if (programmerOptions is not null)
+            {
+                Grid.SetRow(programmerOptions.RadixControls, 1);
+                body.Children.Add(programmerOptions.RadixControls);
+            }
 
-            var display = new Grid { MinHeight = calculatorLayout ? 72 : viewMode == 3 ? 100 : 64, Padding = new Thickness(6, 0, 10, 0) };
-            display.RowDefinitions.Add(new RowDefinition { Height = calculatorLayout ? new GridLength(20, GridUnitType.Star) : GridLength.Auto });
-            display.RowDefinitions.Add(new RowDefinition { Height = new GridLength(calculatorLayout ? 72 : 1, GridUnitType.Star) });
-            display.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var display = new Grid { MinHeight = 72, Padding = new Thickness(6, 0, 10, 0) };
+            display.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20, GridUnitType.Star) });
+            display.RowDefinitions.Add(new RowDefinition { Height = new GridLength(72, GridUnitType.Star) });
             display.Children.Add(expression);
             var scaledResult = new Viewbox { Child = result, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly,
-                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = calculatorLayout ? VerticalAlignment.Top : VerticalAlignment.Center };
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
             Grid.SetRow(scaledResult, 1);
             display.Children.Add(scaledResult);
-            if (viewMode == 3) { Grid.SetRow(converted, 2); display.Children.Add(converted); }
             expression.VerticalAlignment = VerticalAlignment.Bottom;
-            Grid.SetRow(display, calculatorLayout ? 0 : 1);
+            Grid.SetRow(display, 0);
             body.Children.Add(display);
 
             var memoryRow = new Grid();
-            if (viewMode < 3)
+            if (viewMode < 2)
             {
                 for (int index = 0; index < snapshot.MemoryButtons.Count; index++)
                 {
@@ -282,7 +324,13 @@ public sealed class CalculatorPage : Page
                 memoryRow.Children.Add(memoryDropdown);
             }
             Grid.SetRow(memoryRow, 2);
-            body.Children.Add(memoryRow);
+            if (programmerOptions is not null)
+            {
+                Grid.SetRow(programmerOptions.InputControls, 2);
+                body.Children.Add(programmerOptions.InputControls);
+                programmerOptions.SetDocked(docked);
+            }
+            else body.Children.Add(memoryRow);
             var keypad = new Grid();
             numberKeypad = keypad;
             var keypadRows = GetKeypadRows();
@@ -293,14 +341,26 @@ public sealed class CalculatorPage : Page
                 for (int column = 0; column < rowButtons.Count; column++)
                 {
                     if (keypad.ColumnDefinitions.Count <= column) keypad.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    var button = CreateCommandButton(rowButtons[column]);
+                    var button = viewMode == 2 && row == 0 && column is 1 or 2
+                        ? column == 1 ? programmerOptions!.LeftShiftButton : programmerOptions!.RightShiftButton
+                        : CreateCommandButton(rowButtons[column]);
                     Grid.SetRow(button, row);
                     Grid.SetColumn(button, column);
-                    if (viewMode == 2 && row == 0 && column == 3) Grid.SetColumnSpan(button, 2);
+
                     keypad.Children.Add(button);
                 }
             }
-            if (scientificOptions is not null)
+            if (programmerOptions is not null)
+            {
+                var programmerKeypad = new Grid();
+                programmerKeypad.RowDefinitions.Add(new RowDefinition { Height = new GridLength(40) });
+                programmerKeypad.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                programmerKeypad.Children.Add(programmerOptions);
+                Grid.SetRow(keypad, 1); programmerKeypad.Children.Add(keypad);
+                Grid.SetRow(programmerOptions.BitControls, 1); programmerKeypad.Children.Add(programmerOptions.BitControls);
+                Grid.SetRow(programmerKeypad, 3); body.Children.Add(programmerKeypad);
+            }
+            else if (scientificOptions is not null)
             {
                 var scientificKeypad = new Grid();
                 scientificKeypad.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = 44 });
@@ -351,7 +411,7 @@ public sealed class CalculatorPage : Page
         {
             if (viewMode is 1 or 2) { button.MinHeight = 28; button.Padding = new Thickness(2); button.Margin = new Thickness(1); }
             bool digit = spec.Title.Length == 1 && char.IsDigit(spec.Title[0]) || spec.AccessibleName == "Decimal point"
-                || spec.Title == "±" || viewMode == 2 && spec.Title.Length == 1 && spec.Title[0] is >= 'A' and <= 'F';
+                || spec.Title == "±";
             button.Background = GetBrush(digit ? "CalculatorDigitBackground" : "CalculatorOperationBackground");
             if (viewMode == 1 && spec.Title == "2nd" && snapshot.ScientificShift)
                 button.Background = new SolidColorBrush(ActualTheme == ElementTheme.Dark ? Color.FromArgb(255, 62, 69, 75) : Color.FromArgb(255, 215, 231, 247));
@@ -372,7 +432,7 @@ public sealed class CalculatorPage : Page
         button.FontFamily = glyph ? calculatorIcons : FontFamily;
         bool digit = spec.Title.Length == 1 && char.IsDigit(spec.Title[0]) || spec.AccessibleName == "Decimal point";
         bool arithmetic = spec.Title is "+" or "−" or "×" or "÷" or "=";
-        button.FontSize = compact ? 12 : viewMode == 1
+        button.FontSize = compact ? 12 : viewMode == 3 ? digit ? 18 : 14 : viewMode == 2 ? digit ? 18 : arithmetic ? 20 : 14 : viewMode == 1
             ? digit ? scientificSize switch { 2 => 38, 1 => 24, _ => 18 }
                 : spec.Title == "±" && scientificSize == 2 ? 48 : scientificSize switch { 2 => 34, 1 => 20, _ => 14 }
             : digit || arithmetic ? 20 : spec.Title is "±" or "(" or ")" ? 16 : glyph ? 20 : 16;
@@ -384,6 +444,10 @@ public sealed class CalculatorPage : Page
         caption.Text = glyph ? symbol : spec.Title;
         caption.FontFamily = button.FontFamily;
         caption.FontSize = button.FontSize;
+        caption.Foreground = new SolidColorBrush(spec.Title == "="
+            ? ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White
+            : ActualTheme == ElementTheme.Light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White);
+        caption.Opacity = spec.Enabled ? 1 : 0.4;
     }
 
     private IReadOnlyList<IReadOnlyList<CalculatorButton>> GetKeypadRows()
@@ -393,17 +457,18 @@ public sealed class CalculatorPage : Page
         // The programmer operator flyouts own bitwise commands. The main keypad follows the five-column source layout.
         int[][] commands =
         [
-            [140, 82, 81, 83],
+            [140, buttons.Values.First(button => button.Title == "<<").Command, buttons.Values.First(button => button.Title == ">>").Command, 81, 83],
             [141, 128, 129, 95, 91],
             [142, 137, 138, 139, 92],
             [143, 134, 135, 136, 94],
             [144, 131, 132, 133, 93],
             [145, 80, 130, 84, 121]
         ];
-        return commands.Select(row => (IReadOnlyList<CalculatorButton>)row.Select(command => buttons[command]).ToArray()).ToArray();
+        return commands.Select(row => (IReadOnlyList<CalculatorButton>)row.Select(command => command == 95
+            ? buttons[command] with { Title = "%" } : buttons[command]).ToArray()).ToArray();
     }
 
-    private void BuildCalculatorOptions(StackPanel controls)
+    private void BuildCalculatorOptions()
     {
         if (viewMode == 1)
         {
@@ -417,52 +482,94 @@ public sealed class CalculatorPage : Page
         {
             if (numberKeypad is not null) numberKeypad.Visibility = bits ? Visibility.Collapsed : Visibility.Visible;
         };
-        controls.Children.Add(programmerOptions);
+        programmerOptions.MemoryRequested += () => ShowDetails(true);
     }
 
-    private void BuildConverter(StackPanel controls)
+    private void BuildConverter()
     {
-        fromUnit = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        toUnit = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        fromUnit.ItemsSource = snapshot.Units;
-        toUnit.ItemsSource = snapshot.Units;
-        fromUnit.SelectedIndex = snapshot.FromUnitIndex;
-        toUnit.SelectedIndex = snapshot.ToUnitIndex;
-        fromUnit.SelectionChanged += (_, _) => SelectUnits();
-        toUnit.SelectionChanged += (_, _) => SelectUnits();
-        AutomationProperties.SetName(fromUnit, "Convert from unit");
-        AutomationProperties.SetName(toUnit, "Convert to unit");
-        var units = new Grid { ColumnSpacing = 8 };
-        units.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        units.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        units.Children.Add(fromUnit);
-        Grid.SetColumn(toUnit, 1);
-        units.Children.Add(toUnit);
-        controls.Children.Add(units);
+        result = new TextBlock { FontSize = 40, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, IsTextSelectionEnabled = true };
+        converted = new TextBlock { FontSize = 40, FontWeight = Microsoft.UI.Text.FontWeights.Light, IsTextSelectionEnabled = true };
+        expression = new TextBlock();
+        result.ContextFlyout = CreateClipboardMenu(() => snapshot.Primary, true);
+        converted.ContextFlyout = CreateClipboardMenu(() => snapshot.Converted, false);
+        fromUnit = CreateUnitPicker("Convert from unit", snapshot.FromUnitIndex);
+        toUnit = CreateUnitPicker("Convert to unit", snapshot.ToUnitIndex);
+        foreach (var weight in new[] { 56, 32, 56, 32, 0, 272 })
+            body.RowDefinitions.Add(new RowDefinition { Height = weight == 0 ? GridLength.Auto : new GridLength(weight, GridUnitType.Star) });
+        Grid.SetRow(fromUnit, 1); Grid.SetRow(toUnit, 3);
+        body.Children.Add(fromUnit); body.Children.Add(toUnit);
+        UIElement Value(TextBlock value, TextBlock symbol)
+        {
+            var line = new Grid { Margin = new Thickness(16, 0, 12, 0) };
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            line.Children.Add(symbol);
+            var scale = new Viewbox { Child = value, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly,
+                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 4) };
+            Grid.SetColumn(scale, 1); line.Children.Add(scale);
+            return line;
+        }
+        var primary = Value(result, fromSymbol); var secondary = Value(converted, toSymbol);
+        Grid.SetRow(secondary, 2); body.Children.Add(primary); body.Children.Add(secondary);
+        fromUnit.Margin = toUnit.Margin = new Thickness(4, 0, 4, 0);
         if (snapshot.CategoryIndex == CurrencyCategory)
         {
-            var status = snapshot.Currency;
-            string dates = status.ReferenceDate == status.ReferenceEndDate || status.ReferenceEndDate.Length == 0
-                ? status.ReferenceDate : $"{status.ReferenceDate} to {status.ReferenceEndDate}";
-            string description = status.Available ? $"{status.Provider}: {dates}" : "Download currency rates";
-            if (status.Status == "cached") description += " (saved)";
-            if (status.Status == "loading") description = "Updating rates…";
-            var rateInfo = new Grid { ColumnSpacing = 4 };
-            rateInfo.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            rateInfo.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var source = new HyperlinkButton { Content = new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap, FontSize = 12 },
-                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(0) };
-            if (status.SourceUrl.Length > 0) source.NavigateUri = new Uri(status.SourceUrl);
-            ToolTipService.SetToolTip(source, status.Attribution + (status.Error.Length > 0 ? "\n" + status.Error : ""));
-            rateInfo.Children.Add(source);
-            var update = new Button { Content = new FontIcon { Glyph = "\uE72C", FontSize = 16 }, IsEnabled = !refreshingRates, MinHeight = 28, MinWidth = 28, Padding = new Thickness(4) };
+            var info = new StackPanel { Margin = new Thickness(16, 0, 0, 0), Spacing = 2 };
+            info.Children.Add(rateEquality); info.Children.Add(rateTimestamp);
+            var update = new HyperlinkButton { Content = "Update rates", FontSize = 14, Padding = new Thickness(0), MinHeight = 24, HorizontalAlignment = HorizontalAlignment.Left, IsEnabled = !refreshingRates };
             AutomationProperties.SetName(update, "Update rates");
-            ToolTipService.SetToolTip(update, "Update rates");
             update.Click += async (_, _) => await RefreshRatesAsync(true);
-            Grid.SetColumn(update, 1);
-            rateInfo.Children.Add(update);
-            controls.Children.Add(rateInfo);
+            info.Children.Add(update);
+            Grid.SetRow(info, 4); body.Children.Add(info);
         }
+        var keypad = new Grid(); numberKeypad = keypad;
+        for (var row = 0; row < 5; row++) keypad.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        for (var column = 0; column < 3; column++) keypad.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var specs = snapshot.ButtonRows.SelectMany(row => row).ToArray();
+        void Key(string title, int row, int column, string? caption = null)
+        {
+            var spec = specs.First(button => button.Title == title);
+            if (caption is not null) spec = spec with { Title = caption };
+            var button = CreateCommandButton(spec);
+            Grid.SetRow(button, row); Grid.SetColumn(button, column); keypad.Children.Add(button);
+        }
+        Key("C", 0, 1, "CE"); Key("⌫", 0, 2);
+        for (var digit = 1; digit <= 9; digit++) Key(digit.ToString(CultureInfo.InvariantCulture), 3 - (digit - 1) / 3, (digit - 1) % 3);
+        Key("0", 4, 1); Key(specs.First(button => button.AccessibleName == "Decimal point").Title, 4, 2);
+        if (snapshot.SupportsNegative) Key("±", 4, 0);
+        Grid.SetRow(keypad, 5); body.Children.Add(keypad);
+    }
+
+    private ComboBox CreateUnitPicker(string name, int index)
+    {
+        var picker = new ComboBox { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            MinWidth = 0, MaxWidth = 500, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            ItemsSource = snapshot.Units.Select(unit => snapshot.CategoryIndex == CurrencyCategory ? CurrencyPresentation.Name(unit) : unit).ToArray(), SelectedIndex = index, FontSize = 14 };
+        SubtlePicker(picker);
+        picker.SelectionChanged += (_, _) => SelectUnits();
+        AutomationProperties.SetName(picker, name);
+        return picker;
+    }
+
+    internal static void SubtlePicker(ComboBox picker)
+    {
+        foreach (var key in new[] { "ComboBoxBackground", "ComboBoxBackgroundUnfocused", "ComboBoxBackgroundFocused", "ComboBoxBorderBrush", "ComboBoxBorderBrushFocused", "ComboBoxBorderBrushPointerOver" })
+            picker.Resources[key] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+    }
+
+    private void UpdateConverterPresentation()
+    {
+        var currency = snapshot.CategoryIndex == CurrencyCategory;
+        string from = snapshot.Units.ElementAtOrDefault(snapshot.FromUnitIndex) ?? "";
+        string to = snapshot.Units.ElementAtOrDefault(snapshot.ToUnitIndex) ?? "";
+        fromSymbol.Text = currency ? CurrencyPresentation.Symbol(from) : "";
+        toSymbol.Text = currency ? CurrencyPresentation.Symbol(to) : "";
+        fromSymbol.Visibility = toSymbol.Visibility = currency ? Visibility.Visible : Visibility.Collapsed;
+        var status = snapshot.Currency;
+        rateEquality.Text = status.Available ? $"1 {from} = {snapshot.CurrencyRatio.ToString("G6", CultureInfo.CurrentCulture)} {to}" : "";
+        rateTimestamp.Text = DateTimeOffset.TryParse(status.FetchedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var fetched)
+            ? "Updated " + fetched.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) : "";
+        ToolTipService.SetToolTip(rateTimestamp, status.Attribution + "\n" + status.ReferenceDate + (status.Error.Length > 0 ? "\n" + status.Error : ""));
     }
 
     private async Task RefreshRatesAsync(bool forceRefresh = false)
@@ -528,6 +635,7 @@ public sealed class CalculatorPage : Page
         result.Text = snapshot.Primary;
         expression.Text = snapshot.Expression;
         converted.Text = snapshot.Converted;
+        if (viewMode == 3) UpdateConverterPresentation();
         notice.Text = snapshot.Notice;
         notice.Visibility = notice.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         var specs = snapshot.ButtonRows.SelectMany(row => row).Concat(snapshot.MemoryButtons).Concat(snapshot.AngleButtons)
@@ -536,11 +644,14 @@ public sealed class CalculatorPage : Page
             if (specs.TryGetValue(entry.Value, out var spec))
             {
                 entry.Key.IsEnabled = spec.Enabled;
+                if (viewMode == 2 && spec.Title == "mod") spec = spec with { Title = "%" };
+                if (viewMode == 3 && spec.Title == "C") spec = spec with { Title = "CE" };
                 SetButtonCaption(entry.Key, spec, snapshot.MemoryButtons.Any(memory => memory.Command == entry.Value));
             }
         if (memoryDropdown is not null) memoryDropdown.IsEnabled = snapshot.Memory.Count > 0;
         scientificOptions?.Update(snapshot);
         programmerOptions?.Update(snapshot);
+        if (docked) RefreshDock();
     }
 
     private void ShowError(string message)
@@ -693,12 +804,47 @@ public sealed class CalculatorPage : Page
         return null;
     }
 
+    private void UpdateDockLayout()
+    {
+        bool shouldDock = viewMode < 3 && ActualWidth >= 560;
+        docked = shouldDock;
+        root.ColumnDefinitions[1].Width = shouldDock ? new GridLength(240, GridUnitType.Star) : new GridLength(0);
+        root.ColumnDefinitions[0].Width = new GridLength(shouldDock ? 320 : 1, GridUnitType.Star);
+        dock.Visibility = shouldDock ? Visibility.Visible : Visibility.Collapsed;
+        details.Visibility = viewMode < 2 && !shouldDock ? Visibility.Visible : Visibility.Collapsed;
+        if (memoryDropdown is not null) memoryDropdown.Visibility = shouldDock ? Visibility.Collapsed : Visibility.Visible;
+        programmerOptions?.SetDocked(shouldDock);
+        if (shouldDock) RefreshDock();
+    }
+
+    private void RefreshDock()
+    {
+        var current = calculator.GetSnapshot();
+        var revision = viewMode + "|" + string.Join("|", current.Memory) + "|" + string.Join("|", current.History);
+        if (revision == dockRevision) return;
+        dockRevision = revision;
+        dock.Children.Clear();
+        dock.Children.Add(CreateDetailsContent(viewMode == 2 || memorySelected));
+    }
+
     private void ShowDetails(bool selectMemory = false)
     {
         detailsFlyout?.Hide();
+        if (docked) { RefreshDock(); return; }
+        detailsFlyout = new Flyout { Content = new Border { Child = CreateDetailsContent(selectMemory), Width = 280, MaxHeight = 460 } };
+        detailsFlyout.ShowAt(memoryDropdown is not null && selectMemory ? memoryDropdown : details);
+    }
+
+    private UIElement CreateDetailsContent(bool selectMemory = false)
+    {
         snapshot = calculator.GetSnapshot();
-        var entries = new StackPanel { Spacing = 8, Width = 300 };
-        var tabs = new Pivot();
+        var entries = new StackPanel { Spacing = 8 };
+        var tabs = new Grid();
+        tabs.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+        tabs.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var tabHeader = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
+        var tabContent = new ContentPresenter { Margin = new Thickness(0, 16, 0, 0) };
+        Grid.SetRow(tabContent, 1); tabs.Children.Add(tabHeader); tabs.Children.Add(tabContent);
         var history = new StackPanel { Spacing = 6 };
         foreach (var item in snapshot.History.Select((value, index) => (value, index)))
         {
@@ -710,11 +856,11 @@ public sealed class CalculatorPage : Page
             remove.Click += (_, _) => { calculator.RemoveHistory(item.index); detailsFlyout?.Hide(); RefreshDisplay(); };
             row.Children.Add(recall); row.Children.Add(remove); history.Children.Add(row);
         }
-        if (snapshot.History.Count == 0) history.Children.Add(new TextBlock { Text = "No history yet" });
+        if (snapshot.History.Count == 0) history.Children.Add(new TextBlock { Text = "There’s no history yet.", FontSize = 14 });
         var clear = new Button { Content = "Clear history" };
         clear.Click += (_, _) => { calculator.ClearHistory(); detailsFlyout?.Hide(); RefreshDisplay(); };
         history.Children.Add(clear);
-        tabs.Items.Add(new PivotItem { Header = "History", Content = history });
+
         var memory = new StackPanel { Spacing = 8 };
         for (int index = 0; index < snapshot.Memory.Count; index++)
         {
@@ -731,56 +877,78 @@ public sealed class CalculatorPage : Page
             }
             memory.Children.Add(actions);
         }
-        if (snapshot.Memory.Count == 0) memory.Children.Add(new TextBlock { Text = "No stored memory" });
-        tabs.Items.Add(new PivotItem { Header = "Memory", Content = memory });
-        tabs.SelectedIndex = selectMemory ? 1 : 0;
+        if (snapshot.Memory.Count == 0) memory.Children.Add(new TextBlock { Text = "There’s nothing saved in memory.", FontSize = 14 });
+        var markers = new List<(Border Indicator, bool Memory)>();
+        void Select(bool showMemory)
+        {
+            memorySelected = showMemory;
+            tabContent.Content = showMemory ? memory : history;
+            foreach (var marker in markers) marker.Indicator.Visibility = marker.Memory == showMemory ? Visibility.Visible : Visibility.Collapsed;
+        }
+        void Tab(string title, bool isMemory)
+        {
+            var caption = new Grid();
+            caption.Children.Add(new TextBlock { Text = title, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+            var marker = new Border { Width = 16, Height = 3, CornerRadius = new CornerRadius(2), Background = (Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"], VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center };
+            caption.Children.Add(marker); markers.Add((marker, isMemory));
+            var button = new Button { Content = caption, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(0), Height = 48 };
+            button.Click += (_, _) => Select(isMemory); AutomationProperties.SetName(button, title);
+            tabHeader.Children.Add(button);
+        }
+        if (viewMode != 2) Tab("History", false);
+        Tab("Memory", true); Select(viewMode == 2 || selectMemory);
         entries.Children.Add(tabs);
-        detailsFlyout = new Flyout { Content = new ScrollViewer { Content = entries, MaxHeight = 460 } };
-        detailsFlyout.ShowAt(details);
+        return new ScrollViewer { Content = entries, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
 
     private ScrollViewer CreateSettings()
     {
-        var settings = new StackPanel { Spacing = 20, Margin = new Thickness(12, 20, 12, 12) };
-        var appearance = new ComboBox { Header = "Appearance", ItemsSource = new[] { "Use system setting", "Light", "Dark" },
-            SelectedIndex = RequestedTheme switch { ElementTheme.Light => 1, ElementTheme.Dark => 2, _ => 0 },
-            HorizontalAlignment = HorizontalAlignment.Stretch };
-        appearance.SelectionChanged += (_, _) =>
+        var settings = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
+        TextBlock Label(string text) => new() { Text = text, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) };
+        settings.Children.Add(Label("Appearance"));
+        themeOptions.Clear();
+        var choices = new StackPanel { Spacing = 4, Margin = new Thickness(16, 0, 16, 12) };
+        foreach (var item in new[] { ("Light", ElementTheme.Light), ("Dark", ElementTheme.Dark), ("Use system setting", ElementTheme.Default) })
         {
-            RequestedTheme = appearance.SelectedIndex switch
-            {
-                1 => ElementTheme.Light, 2 => ElementTheme.Dark, _ => ElementTheme.Default
-            };
-            ThemePreferences.SaveTheme(RequestedTheme);
-        };
+            var theme = item.Item2;
+            var option = new RadioButton { Content = item.Item1, GroupName = "CalculatorTheme", FontSize = 14, IsChecked = RequestedTheme == theme };
+            option.Checked += (_, _) => { RequestedTheme = theme; if (!Program.IsSmokeTest) ThemePreferences.SaveTheme(theme); };
+            themeOptions.Add(option);
+            choices.Children.Add(option);
+        }
+        var themeHeader = new StackPanel { Spacing = 2, MinHeight = 44, Margin = new Thickness(0, 10, 0, 10) };
+        themeHeader.Children.Add(new TextBlock { Text = "App theme", FontSize = 14 });
+        themeHeader.Children.Add(new TextBlock { Text = "Select which app theme to display", FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap });
+        var appearance = new Expander { Header = themeHeader, MinHeight = 68, Content = choices, IsExpanded = appearanceExpanded, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        appearance.Expanding += (_, _) => appearanceExpanded = true;
+        appearance.Collapsed += (_, _) => appearanceExpanded = false;
+        AutomationProperties.SetName(appearance, "App theme");
         settings.Children.Add(appearance);
-        var about = new Button { Content = "About Calculator", HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left };
-        about.Click += async (_, _) => await ShowAboutAsync();
+        var aboutTitle = Label("About"); aboutTitle.Margin = new Thickness(0, 34, 0, 8); settings.Children.Add(aboutTitle);
+        var info = calculator.GetAbout();
+        var aboutHeader = new StackPanel { Spacing = 4, Margin = new Thickness(0, 10, 0, 10) };
+        aboutHeader.Children.Add(new TextBlock { Text = "Calculator", FontSize = 14 });
+        aboutHeader.Children.Add(new TextBlock { Text = info.Copyright, FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap });
+        aboutHeader.Children.Add(new TextBlock { Text = info.Version, FontSize = 14, Opacity = 0.85, Margin = new Thickness(0, 4, 0, 0) });
+        var links = new StackPanel { Spacing = 8, Margin = new Thickness(16, 0, 16, 12) };
+        foreach (var link in new[] { ("Microsoft Windows Calculator source", info.SourceUrl), ("Microsoft privacy statement", info.PrivacyUrl), ("Microsoft services agreement", info.ServicesUrl) })
+            links.Children.Add(new HyperlinkButton { Content = link.Item1, NavigateUri = new Uri(link.Item2), FontSize = 14, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left });
+        if (info.GraphingEnabled) links.Children.Add(new TextBlock { Text = $"Graphing engine {info.GraphingVersion}", FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        var license = new Expander { Header = "Open source licenses", Content = new TextBlock { Text = info.License, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }, HorizontalAlignment = HorizontalAlignment.Stretch };
+        links.Children.Add(license);
+        var about = new Expander { Header = aboutHeader, Content = links, IsExpanded = aboutExpanded, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        about.Expanding += (_, _) => aboutExpanded = true;
+        about.Collapsed += (_, _) => aboutExpanded = false;
+        AutomationProperties.SetName(about, "About Calculator");
         settings.Children.Add(about);
-        var info = calculator.GetAbout();
-        settings.Children.Add(new TextBlock { Text = "Version " + info.Version, Opacity = 0.8 });
-        settings.Children.Add(new TextBlock { Text = info.Copyright, FontSize = 13, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 });
-        settings.Children.Add(new HyperlinkButton { Content = "Send feedback", NavigateUri = new Uri("https://github.com/sabino/calculator/issues") });
-        settings.Children.Add(new HyperlinkButton { Content = "Contribute to Calculator", NavigateUri = new Uri("https://github.com/sabino/calculator") });
+        settings.Children.Add(new HyperlinkButton { Content = "Send feedback", NavigateUri = new Uri("https://github.com/sabino/calculator/issues"), FontSize = 14, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 16, 0, 0) });
+        var contribute = new TextBlock { FontSize = 14, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 24, 0, 0) };
+        contribute.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "To learn how you can contribute to Windows Calculator, check out the project on " });
+        var github = new Microsoft.UI.Xaml.Documents.Hyperlink { NavigateUri = new Uri("https://github.com/sabino/calculator") };
+        github.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "GitHub" });
+        contribute.Inlines.Add(github); contribute.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "." });
+        settings.Children.Add(contribute);
         return new ScrollViewer { Content = settings, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-    }
-
-    private async Task ShowAboutAsync()
-    {
-        var info = calculator.GetAbout();
-        var content = new StackPanel { Spacing = 10 };
-        content.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/calculator.png")), Width = 96, Height = 96 });
-        content.Children.Add(new TextBlock { Text = $"Version {info.Version}", TextWrapping = TextWrapping.Wrap });
-        content.Children.Add(new TextBlock { Text = info.Copyright, TextWrapping = TextWrapping.Wrap });
-        if (info.GraphingEnabled) content.Children.Add(new TextBlock { Text = $"Portable graphing engine {info.GraphingVersion}" });
-        content.Children.Add(new HyperlinkButton { Content = "Microsoft Windows Calculator source", NavigateUri = new Uri(info.SourceUrl) });
-        content.Children.Add(new HyperlinkButton { Content = "Microsoft privacy statement", NavigateUri = new Uri(info.PrivacyUrl) });
-        content.Children.Add(new HyperlinkButton { Content = "Microsoft services agreement", NavigateUri = new Uri(info.ServicesUrl) });
-        content.Children.Add(new Expander { Header = "Microsoft source license", Content = new TextBlock { Text = info.License, TextWrapping = TextWrapping.Wrap } });
-        var dialog = new ContentDialog { Title = "About Calculator", Content = new ScrollViewer { Content = content, MaxHeight = 440 },
-            CloseButtonText = "Close", XamlRoot = XamlRoot };
-        await dialog.ShowAsync();
     }
 
     private static void InvokeButton(Button button)
@@ -831,7 +999,7 @@ public sealed class CalculatorPage : Page
         foreach (var size in new[] { new SizeInt32 { Width = 320, Height = 500 }, new SizeInt32 { Width = 420, Height = 900 },
             new SizeInt32 { Width = 900, Height = 1400 }, new SizeInt32 { Width = 420, Height = 680 } })
         {
-            window.AppWindow.Resize(size);
+            WindowAppearance.ResizeContent(window, size);
             await Task.Delay(100);
             UpdateLayout();
             var angleBounds = scientificOptions!.AngleControls.TransformToVisual(body).TransformBounds(new Rect(0, 0,
@@ -847,8 +1015,38 @@ public sealed class CalculatorPage : Page
         SetMode(2);
         if (programmerOptions?.RunSmokeChecks() != true)
             throw new InvalidOperationException("Programmer controls failed. " + programmerOptions?.LastSmokeFailure);
+        foreach (var size in new[] { new SizeInt32 { Width = 320, Height = 500 }, new SizeInt32 { Width = 530, Height = 676 }, new SizeInt32 { Width = 690, Height = 676 } })
+        {
+            WindowAppearance.ResizeContent(window, size);
+            await Task.Delay(100);
+            UpdateLayout();
+            var radix = programmerOptions!.RadixControls.TransformToVisual(body).TransformBounds(new Rect(0, 0, programmerOptions.RadixControls.ActualWidth, programmerOptions.RadixControls.ActualHeight));
+            var display = result.TransformToVisual(body).TransformBounds(new Rect(0, 0, result.ActualWidth, result.ActualHeight));
+            var keys = numberKeypad!.TransformToVisual(body).TransformBounds(new Rect(0, 0, numberKeypad.ActualWidth, numberKeypad.ActualHeight));
+            if (display.Bottom > radix.Top + 1 || keys.Top < radix.Bottom || keys.Height < 6 * 28 || keys.Bottom > body.ActualHeight + 1
+                || docked != (ActualWidth >= 560) || details.Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException($"Programmer layout at {size.Width}x{size.Height}: root={root.ActualWidth}x{root.ActualHeight}, result={display}, radix={radix}, keys={keys}, docked={docked}, details={details.Visibility}.");
+        }
+        WindowAppearance.ResizeContent(window, new SizeInt32 { Width = 320, Height = 676 });
+        await Task.Delay(100);
         SetMode(3);
         if (snapshot.Categories.Count != 13 || fromUnit.Items.Count == 0) throw new InvalidOperationException("Converter controls are incomplete.");
+        for (var category = 0; category < CurrencyCategory; category++)
+        {
+            SetCategory(category);
+            UpdateLayout();
+            if (fromUnit.Items.Count != snapshot.Units.Count || toUnit.Items.Count != snapshot.Units.Count || numberKeypad!.Children.Count != (snapshot.SupportsNegative ? 14 : 13))
+                throw new InvalidOperationException("A converter is missing its unit choices or has the wrong keypad.");
+            var primary = result.TransformToVisual(body).TransformPoint(new Point());
+            var source = fromUnit.TransformToVisual(body).TransformPoint(new Point());
+            var secondary = converted.TransformToVisual(body).TransformPoint(new Point());
+            var target = toUnit.TransformToVisual(body).TransformPoint(new Point());
+            if (!(primary.Y < source.Y && source.Y < secondary.Y && secondary.Y < target.Y) || details.Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("A converter has misplaced values, units, or history controls.");
+            if (!calculator.PasteNumber("12")) throw new InvalidOperationException(calculator.LastError);
+            RefreshDisplay();
+            if (result.Text.Length == 0 || converted.Text.Length == 0) throw new InvalidOperationException("A converter did not update both values.");
+        }
         if (!calculator.SetCurrencyRates("2026-10-09", "2026-10-12T12:00:00Z", "EUR=1\nUSD=1.1206\nBRL=5.6086"))
             throw new InvalidOperationException(calculator.LastError);
         SetCategory(CurrencyCategory);
@@ -869,6 +1067,24 @@ public sealed class CalculatorPage : Page
             if (graphPanel?.RunSmokeChecks() != true)
                 throw new InvalidOperationException("Shared Skia graph controls failed. " + graphPanel?.LastSmokeFailure);
         }
+        SetMode(6);
+        UpdateLayout();
+        if (details.Visibility != Visibility.Collapsed || body.Children.Count != 1 || heading.Text != "Settings")
+            throw new InvalidOperationException("Settings has calculator controls or the wrong title.");
+        var settingsControl = body.Children[0];
+        foreach (var choice in new[] { 1, 0 })
+        {
+            var option = themeOptions[choice];
+            var peer = new RadioButtonAutomationPeer(option);
+            if (peer.GetPattern(PatternInterface.SelectionItem) is not ISelectionItemProvider selection)
+                throw new InvalidOperationException("Theme options have no selection provider.");
+            selection.Select();
+            await Task.Delay(100);
+            if (RequestedTheme != (choice == 1 ? ElementTheme.Dark : ElementTheme.Light)
+                || option.IsChecked != true || body.Children[0] != settingsControl)
+                throw new InvalidOperationException("Changing the Settings theme replaced or reverted its radio selection.");
+        }
+        RequestedTheme = originalTheme;
         SetMode(0);
     }
 

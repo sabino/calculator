@@ -15,30 +15,32 @@ public sealed class DatePanel : Grid
     private readonly NativeCalculator _calculator;
     private readonly ComboBox _operation = new()
     {
-        Header = "Calculation",
-        ItemsSource = new[] { "Difference between dates", "Add to a date", "Subtract from a date" },
+        ItemsSource = new[] { "Difference between dates", "Add or subtract days" },
         SelectedIndex = 0,
         HorizontalAlignment = HorizontalAlignment.Left,
-        MinWidth = 240
+        MinWidth = 0, BorderThickness = new Thickness(0), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent)
     };
-    private readonly CalendarDatePicker _from = CreateDatePicker("From date");
-    private readonly CalendarDatePicker _to = CreateDatePicker("To date");
+    private readonly CalendarDatePicker _from = CreateDatePicker("From");
+    private readonly CalendarDatePicker _to = CreateDatePicker("To");
     private readonly NumberBox _years = CreateOffset("Years");
     private readonly NumberBox _months = CreateOffset("Months");
     private readonly NumberBox _days = CreateOffset("Days");
     private readonly Grid _duration = new() { ColumnSpacing = 12 };
     private readonly TextBlock _result = new()
     {
-        FontSize = 28,
+        FontSize = 14,
         TextWrapping = TextWrapping.Wrap,
         IsTextSelectionEnabled = true
     };
     private readonly TextBlock _totalDays = new()
     {
-        FontSize = 17,
+        FontSize = 14,
         TextWrapping = TextWrapping.Wrap,
         IsTextSelectionEnabled = true
     };
+    private readonly RadioButton _add = new() { Content = "Add", GroupName = "DateOffset", IsChecked = true, FontSize = 14 };
+    private readonly RadioButton _subtract = new() { Content = "Subtract", GroupName = "DateOffset", FontSize = 14 };
+    private readonly TextBlock _resultLabel = new() { Text = "Difference", FontSize = 12, Opacity = 0.75 };
     private bool _updatingControls;
     private bool _hasError;
     private CivilDate? _shiftResult;
@@ -48,32 +50,19 @@ public sealed class DatePanel : Grid
     {
         ArgumentNullException.ThrowIfNull(calculator);
         _calculator = calculator;
-        RowSpacing = 16;
+        Margin = new Thickness(16, 0, 16, 0);
         MaxWidth = 760;
         HorizontalAlignment = HorizontalAlignment.Stretch;
         VerticalAlignment = VerticalAlignment.Top;
-        for (var row = 0; row < 6; row++)
-            RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
+        for (var row = 0; row < 6; row++) RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         AutomationProperties.SetName(_operation, "Date calculation operation");
+        CalculatorPage.SubtlePicker(_operation);
+        _operation.Margin = new Thickness(-12, 0, 0, 0);
         Children.Add(_operation);
-        var range = new TextBlock
-        {
-            Text = "Gregorian calendar · January 1, 1601 through December 31, 9999",
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.75
-        };
-        SetRow(range, 1);
-        Children.Add(range);
-
-        var dates = new Grid { ColumnSpacing = 16 };
-        dates.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        dates.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        dates.Children.Add(_from);
-        SetColumn(_to, 1);
-        dates.Children.Add(_to);
-        SetRow(dates, 2);
-        Children.Add(dates);
+        _from.Margin = new Thickness(0, 17, 0, 0);
+        _to.Margin = new Thickness(0, 24, 0, 0);
+        SetRow(_from, 1); Children.Add(_from);
+        SetRow(_to, 2); Children.Add(_to);
         var today = DateOnly.FromDateTime(DateTime.Today);
         _from.Date = _to.Date = ToPickerDate(today);
 
@@ -84,15 +73,26 @@ public sealed class DatePanel : Grid
             SetColumn(offsets[index], index);
             _duration.Children.Add(offsets[index]);
         }
+        var direction = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20 };
+        direction.Children.Add(_add); direction.Children.Add(_subtract);
+        _duration.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _duration.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        SetColumnSpan(direction, 3); _duration.Children.Add(direction);
+        foreach (var offset in offsets) { SetRow(offset, 1); offset.Margin = new Thickness(0, 24, 0, 0); }
+        _duration.Margin = new Thickness(0, 24, 0, 0);
         SetRow(_duration, 3);
         Children.Add(_duration);
         AutomationProperties.SetName(_result, "Date calculation result");
-        SetRow(_result, 4);
-        Children.Add(_result);
+        var answer = new StackPanel { Spacing = 4, Margin = new Thickness(0, 24, 0, 0) };
+        answer.Children.Add(_resultLabel); answer.Children.Add(_result);
+        SetRow(answer, 4); Children.Add(answer);
         AutomationProperties.SetName(_totalDays, "Total difference in days");
+        _totalDays.Margin = new Thickness(0, 8, 0, 0);
         SetRow(_totalDays, 5);
         Children.Add(_totalDays);
 
+        _add.Checked += (_, _) => RefreshResult();
+        _subtract.Checked += (_, _) => RefreshResult();
         _operation.SelectionChanged += (_, _) => RefreshResult();
         _from.DateChanged += (_, _) => RefreshResult();
         _to.DateChanged += (_, _) => RefreshResult();
@@ -113,14 +113,19 @@ public sealed class DatePanel : Grid
     {
         var picker = new CalendarDatePicker
         {
-            Header = label,
+            Header = new TextBlock { Text = label, FontSize = 12, Opacity = 0.75 },
             PlaceholderText = "Choose a date",
             CalendarIdentifier = "GregorianCalendar",
             MinDate = ToPickerDate(MinimumDate),
             MaxDate = ToPickerDate(MaximumDate),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            MinWidth = 170
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MinWidth = 0, MaxWidth = 220, FontSize = 14,
+            BorderThickness = new Thickness(0), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Padding = new Thickness(0),
+            DateFormat = "{month.full} {day.integer}, {year.full}"
         };
+        picker.Resources["CalendarDatePickerBackground"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        picker.Resources["CalendarDatePickerBorderBrush"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
         AutomationProperties.SetName(picker, label);
         return picker;
     }
@@ -206,12 +211,13 @@ public sealed class DatePanel : Grid
         _difference = null;
         _totalDays.Text = "";
         var isDifference = _operation.SelectedIndex == 0;
-        _from.Header = isDifference ? "From date" : "Start date";
+        _from.Header = new TextBlock { Text = "From", FontSize = 12, Opacity = 0.75 };
+        _resultLabel.Text = isDifference ? "Difference" : "Date";
         AutomationProperties.SetName(_from, isDifference ? "From date" : "Start date");
         _to.Visibility = isDifference ? Visibility.Visible : Visibility.Collapsed;
-        SetColumnSpan(_from, isDifference ? 1 : 2);
+
         _duration.Visibility = isDifference ? Visibility.Collapsed : Visibility.Visible;
-        if (_operation.SelectedIndex < 0 || _operation.SelectedIndex > 2)
+        if (_operation.SelectedIndex < 0 || _operation.SelectedIndex > 1)
         {
             ShowError("Choose a date calculation operation.");
             return;
@@ -237,8 +243,8 @@ public sealed class DatePanel : Grid
                     return;
                 }
                 _result.Text = FormatDuration(_difference);
-                _totalDays.Text = $"Total difference: {_difference.TotalDays.ToString(CultureInfo.CurrentCulture)} "
-                    + (_difference.TotalDays == 1 ? "day" : "days");
+                _totalDays.Text = _difference.TotalDays > 0 && (_difference.Years != 0 || _difference.Months != 0 || _difference.Weeks != 0)
+                    ? $"{_difference.TotalDays.ToString(CultureInfo.CurrentCulture)} " + (_difference.TotalDays == 1 ? "day" : "days") : "";
                 return;
             }
             if (!TryReadOffset(_years, out var years) || !TryReadOffset(_months, out var months) || !TryReadOffset(_days, out var days))
@@ -246,7 +252,7 @@ public sealed class DatePanel : Grid
                 ShowError("Enter whole numbers from 0 through 9999 for years, months, and days.");
                 return;
             }
-            _shiftResult = _calculator.ShiftDate(from, years, months, days, _operation.SelectedIndex == 2);
+            _shiftResult = _calculator.ShiftDate(from, years, months, days, _subtract.IsChecked == true);
             if (_shiftResult is null)
             {
                 ShowError(_calculator.LastError);
@@ -265,7 +271,9 @@ public sealed class DatePanel : Grid
         _updatingControls = true;
         try
         {
-            _operation.SelectedIndex = operation;
+            _operation.SelectedIndex = operation == 0 ? 0 : 1;
+            _add.IsChecked = operation != 2;
+            _subtract.IsChecked = operation == 2;
             _from.Date = ToPickerDate(from);
             _to.Date = ToPickerDate(to);
             _years.Value = years;
@@ -282,7 +290,7 @@ public sealed class DatePanel : Grid
     public bool RunSmokeChecks()
     {
         var saved = (Operation: _operation.SelectedIndex, From: _from.Date, To: _to.Date,
-            Years: _years.Value, Months: _months.Value, Days: _days.Value);
+            Years: _years.Value, Months: _months.Value, Days: _days.Value, Subtract: _subtract.IsChecked);
         try
         {
             SetSmokeInputs(1, new DateOnly(2008, 1, 31), new DateOnly(2008, 1, 31), 0, 1, 0);
@@ -315,6 +323,8 @@ public sealed class DatePanel : Grid
             try
             {
                 _operation.SelectedIndex = saved.Operation;
+                _subtract.IsChecked = saved.Subtract;
+                _add.IsChecked = saved.Subtract != true;
                 _from.Date = saved.From;
                 _to.Date = saved.To;
                 _years.Value = saved.Years;

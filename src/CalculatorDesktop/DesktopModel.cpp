@@ -1068,6 +1068,15 @@ namespace Desktop
         return m_currencyLoader->GetState();
     }
 
+    double DesktopModel::GetCurrencyRatio() const
+    {
+        if (!IsCurrencySelected() || !GetCurrencyState().available || m_fromIndex >= m_units.size() || m_toIndex >= m_units.size())
+            return 0;
+        const auto ratios = m_currencyLoader->LoadOrderedRatios(m_units[m_fromIndex]);
+        const auto found = ratios.find(m_units[m_toIndex]);
+        return found == ratios.end() ? 0 : found->second.ratio;
+    }
+
     void DesktopModel::UpdateCurrencyAvailability()
     {
         if (m_mode != Mode::Converter || !IsCurrencySelected())

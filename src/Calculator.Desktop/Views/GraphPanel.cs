@@ -39,16 +39,18 @@ public sealed class GraphPanel : Grid
     private TextBox? FocusedEditor => _editors.GetValueOrDefault(_focusedRow);
     private int _focusedRow = -1;
     private readonly GraphingKeypad _keypad;
-    private readonly StackPanel _compactTabs = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
-    private readonly ToggleButton _graphTab = new() { Content = "Graph", IsChecked = true };
-    private readonly ToggleButton _equationsTab = new() { Content = "Equations" };
-    private readonly ToggleButton _traceToggle = new() { Content = "Trace", IsChecked = true };
-    private readonly ToggleButton _activeTraceToggle = new() { Content = "Active trace" };
+    private readonly StackPanel _compactTabs = new() { Orientation = Orientation.Horizontal, Spacing = 0, Height = 32, Margin = new Thickness(0, 0, 12, 0) };
+    public UIElement ViewToggle => _compactTabs;
+    private readonly ToggleButton _graphTab = new() { Content = GraphIcon("\uF770"), IsChecked = true, Width = 32, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(4, 0, 0, 4) };
+    private readonly ToggleButton _equationsTab = new() { Content = GraphIcon("\uF893"), Width = 32, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0, 4, 4, 0) };
+    private readonly ToggleButton _traceToggle = new() { Content = "Show coordinates", IsChecked = true };
+    private readonly ToggleButton _activeTraceToggle = new() { Content = GraphIcon("\uE3B3"), Width = 36, Height = 40, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) };
     private readonly Dictionary<uint, CheckBox> _featureControls = new();
     private double _traceX;
     private double _traceY;
     private InMemoryRandomAccessStream? _clipboardImage;
     private readonly StackPanel _equationRows = new() { Spacing = 10 };
+    private Expander analysis = new();
     private readonly TextBlock _analysis = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private readonly TextBlock _inspector = new() { Text = "Move over a curve to inspect its coordinates.", TextWrapping = TextWrapping.Wrap };
@@ -74,27 +76,18 @@ public sealed class GraphPanel : Grid
     public GraphPanel(NativeGraph graph)
     {
         _graph = graph;
-        RowSpacing = 12;
-        ColumnSpacing = 16;
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(330) });
-        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
+        Margin = new Thickness(-3, 0, -3, 0);
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 300, MaxWidth = 420 });
         var options = new StackPanel { Spacing = 10 };
-        options.Children.Add(Heading("Equations"));
         options.Children.Add(_equationRows);
-        options.Children.Add(Button("Add equation", AddEquation));
-        options.Children.Add(new TextBlock
-        {
-            Text = "Use x, y, or a named parameter, such as y=a*x^2.",
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.75
-        });
+        var addEquation = Button("+", AddEquation, "Add equation");
+        addEquation.HorizontalAlignment = HorizontalAlignment.Left;
+        addEquation.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        addEquation.BorderThickness = new Thickness(0);
+        options.Children.Add(addEquation);
         _keypad = new GraphingKeypad(InsertText, Backspace, ClearEquation, SubmitFocusedEquation, () => FocusedEditor is not null);
         options.Children.Add(_keypad);
-        options.Children.Add(Heading("Analysis"));
         var markers = new StackPanel { Spacing = 2 };
         string[] markerNames = ["Zeros", "Y-intercept", "Minima", "Maxima", "Inflection points", "Vertical asymptotes", "Horizontal asymptotes", "Oblique asymptotes"];
         for (var index = 0; index < markerNames.Length; index++)
@@ -111,102 +104,70 @@ public sealed class GraphPanel : Grid
             _featureControls[bit] = check;
             markers.Children.Add(check);
         }
-        options.Children.Add(new Expander { Header = "Show graph features", Content = markers, HorizontalAlignment = HorizontalAlignment.Stretch });
-        options.Children.Add(_analysis);
+        var analysisContent = new StackPanel { Spacing = 12 };
+        analysisContent.Children.Add(_analysis); analysisContent.Children.Add(markers);
+        analysis = new Expander { Header = "Analysis", Content = analysisContent, HorizontalAlignment = HorizontalAlignment.Stretch };
+        options.Children.Add(analysis);
         _optionsScroll = new ScrollViewer
         {
             Content = options,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Padding = new Thickness(0, 0, 6, 0)
+            Padding = new Thickness(12, 0, 12, 0)
         };
 
-        _plotArea = new Grid { RowSpacing = 8 };
-        _plotArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _plotArea.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        _plotArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _plotArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var toolbar = new StackPanel { Spacing = 6 };
-        var navigation = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var displayOptions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        AutomationProperties.SetName(_angle, "Graph angle units");
-        displayOptions.Children.Add(_angle);
-        navigation.Children.Add(Button("+", () => Mutate(() => _graph.Zoom(1 / 1.0625), false, false), "Zoom in"));
-        navigation.Children.Add(Button("−", () => Mutate(() => _graph.Zoom(1.0625), false, false), "Zoom out"));
-        navigation.Children.Add(Button("Reset", ResetRange, "Reset view"));
-        AutomationProperties.SetName(_traceToggle, "Inspect curve coordinates");
+        _plotArea = new Grid();
+        _plotArea.Children.Add(_canvas);
+        var tools = new StackPanel { Orientation = Orientation.Horizontal };
+        AutomationProperties.SetName(_traceToggle, "Trace graph");
+        ToolTipService.SetToolTip(_traceToggle, "Trace graph");
         _traceToggle.Unchecked += (_, _) => ClearTrace();
-        navigation.Children.Add(_traceToggle);
-        AutomationProperties.SetName(_activeTraceToggle, "Trace selected equation with arrow keys. Plus and minus zoom. Escape exits.");
+        tools.Children.Add(_activeTraceToggle);
+        var share = FlyoutButton("Share", BuildShareControls);
+        SetOverlayButton(share, "\uE72D"); tools.Children.Add(share);
+        var graphSettings = FlyoutButton("Graph options", BuildGraphSettings);
+        SetOverlayButton(graphSettings, "\uE3B4"); tools.Children.Add(graphSettings);
+        _plotArea.Children.Add(new Border { Child = tools, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 48, 48)),
+            CornerRadius = new CornerRadius(4), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(8) });
+        var zoom = new StackPanel();
+        var zoomIn = Button("+", () => Mutate(() => _graph.Zoom(1 / 1.0625), false, false), "Zoom in");
+        SetOverlayButton(zoomIn, "\uE948"); zoom.Children.Add(zoomIn);
+        var zoomOut = Button("−", () => Mutate(() => _graph.Zoom(1.0625), false, false), "Zoom out");
+        SetOverlayButton(zoomOut, "\uE949"); zoom.Children.Add(zoomOut);
+        var reset = Button("Reset", ResetRange, "Reset view");
+        SetOverlayButton(reset, "\uE3B5"); reset.Content = ResetViewIcon(); zoom.Children.Add(reset);
+        _plotArea.Children.Add(new Border { Child = zoom, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 48, 48)),
+            CornerRadius = new CornerRadius(4), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(8) });
+        _inspector.Visibility = Visibility.Collapsed;
+        _inspector.Margin = new Thickness(12, 8, 56, 8);
+        _inspector.VerticalAlignment = VerticalAlignment.Bottom;
+        _plotArea.Children.Add(_inspector);
+        _status.Visibility = Visibility.Collapsed;
+        _status.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) => _status.Visibility = string.IsNullOrEmpty(_status.Text) ? Visibility.Collapsed : Visibility.Visible);
+        _status.VerticalAlignment = VerticalAlignment.Bottom;
+        SetColumnSpan(_status, 2); Children.Add(_status);
+        SetColumn(_optionsScroll, 1);
+        Children.Add(_optionsScroll); Children.Add(_plotArea);
+        _compactTabs.Children.Add(_graphTab); _compactTabs.Children.Add(_equationsTab);
+        AutomationProperties.SetName(_graphTab, "Graph view"); AutomationProperties.SetName(_equationsTab, "Equations view");
+        ToolTipService.SetToolTip(_graphTab, "Graph view"); ToolTipService.SetToolTip(_equationsTab, "Equations view");
+        _graphTab.Click += (_, _) => ShowCompactTab(true);
+        _equationsTab.Click += (_, _) => ShowCompactTab(false);
+        AutomationProperties.SetName(_angle, "Graph angle units");
+        AutomationProperties.SetName(_activeTraceToggle, "Trace selected equation with arrow keys");
         _activeTraceToggle.Checked += (_, _) =>
         {
-            _traceToggle.IsChecked = false;
-            _traceX = 0; _traceY = 0;
-            UpdateActiveTrace();
-            _activeTraceToggle.Focus(FocusState.Programmatic);
+            _traceToggle.IsChecked = false; _traceX = 0; _traceY = 0;
+            UpdateActiveTrace(); _activeTraceToggle.Focus(FocusState.Programmatic);
         };
-        _activeTraceToggle.Unchecked += (_, _) => ClearTrace();
+        _activeTraceToggle.Unchecked += (_, _) => { _traceToggle.IsChecked = true; ClearTrace(); };
         _activeTraceToggle.KeyDown += OnGraphKeyDown;
-        navigation.Children.Add(_activeTraceToggle);
-        displayOptions.Children.Add(FlyoutButton("Settings", BuildGraphSettings));
-        displayOptions.Children.Add(FlyoutButton("Share", BuildShareControls));
-        toolbar.Children.Add(navigation);
-        toolbar.Children.Add(displayOptions);
-        _plotArea.Children.Add(toolbar);
-        var graphBorder = new Border
-        {
-            Child = _canvas,
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
-            BorderThickness = new Thickness(1),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch
-        };
-        SetRow(graphBorder, 1);
-        _plotArea.Children.Add(graphBorder);
-        SetRow(_inspector, 2);
-        _plotArea.Children.Add(_inspector);
-
-        var rangeControls = new Grid { ColumnSpacing = 5 };
-        for (var index = 0; index < 4; index++)
-            rangeControls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        rangeControls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var rangeNames = new[] { "X min", "X max", "Y min", "Y max" };
         for (var index = 0; index < _ranges.Length; index++)
         {
-            _ranges[index].Header = rangeNames[index];
-            AutomationProperties.SetName(_ranges[index], rangeNames[index]);
-            _ranges[index].KeyDown += (_, args) =>
-            {
-                if (args.Key == Windows.System.VirtualKey.Enter)
-                {
-                    ApplyRanges();
-                    args.Handled = true;
-                }
-            };
-            SetColumn(_ranges[index], index);
-            rangeControls.Children.Add(_ranges[index]);
+            _ranges[index].Header = rangeNames[index]; AutomationProperties.SetName(_ranges[index], rangeNames[index]);
+            _ranges[index].KeyDown += (_, args) => { if (args.Key == Windows.System.VirtualKey.Enter) { ApplyRanges(); args.Handled = true; } };
         }
-        var applyRange = Button("Apply", ApplyRanges);
-        applyRange.VerticalAlignment = VerticalAlignment.Bottom;
-        SetColumn(applyRange, 4);
-        rangeControls.Children.Add(applyRange);
-        SetRow(rangeControls, 3);
-        _plotArea.Children.Add(rangeControls);
-        SetRow(_status, 2);
-        SetColumnSpan(_status, 2);
-        Children.Add(_status);
-        Children.Add(_optionsScroll);
-        Children.Add(_plotArea);
-        _compactTabs.Children.Add(_graphTab);
-        _compactTabs.Children.Add(_equationsTab);
-        Children.Add(_compactTabs);
-        SetColumnSpan(_compactTabs, 2);
-        _graphTab.Click += (_, _) => ShowCompactTab(true);
-        _equationsTab.Click += (_, _) => ShowCompactTab(false);
-        SetColumn(_plotArea, 1);
-        SetRow(_optionsScroll, 1);
-        SetRow(_plotArea, 1);
-
         _angle.SelectionChanged += (_, _) =>
         {
             if (!_refreshing && !_mutating && _snapshot is not null && _angle.SelectedIndex >= 0
@@ -237,8 +198,29 @@ public sealed class GraphPanel : Grid
             var colors = ThemeColors(ActualTheme == ElementTheme.Dark);
             Mutate(() => _graph.SetSettings(_snapshot.Settings.LineWidth, colors[0], colors[1], colors[2], colors[3]), false, false);
         };
-        Mutate(() => ReplaceEquations(new[] { "y=x^2-4", "y=x" }, 0));
+        _pendingEquation = "";
+        Mutate(() => _graph.SetSettings(2, "#FFFFFFFF", "#FF000000", "#FF000000", "#FFC6C6C6"), true, false);
         _defaultRange = _snapshot?.Range ?? new GraphRange(-10, 10, -10, 10);
+    }
+
+    private static UIElement ResetViewIcon()
+    {
+        var geometry = new GeometryGroup();
+        foreach (var line in new[] { (2, 6, 2, 2), (2, 2, 6, 2), (10, 2, 14, 2), (14, 2, 14, 6),
+            (14, 10, 14, 14), (14, 14, 10, 14), (6, 14, 2, 14), (2, 14, 2, 10) })
+            geometry.Children.Add(new LineGeometry { StartPoint = new Point(line.Item1, line.Item2), EndPoint = new Point(line.Item3, line.Item4) });
+        geometry.Children.Add(new EllipseGeometry { Center = new Point(8, 8), RadiusX = 3, RadiusY = 3 });
+        return new Microsoft.UI.Xaml.Shapes.Path { Data = geometry, Stroke = new SolidColorBrush(Microsoft.UI.Colors.White), StrokeThickness = 1, Width = 16, Height = 16 };
+    }
+
+    private static FontIcon GraphIcon(string glyph) => new() { Glyph = glyph, FontFamily = new FontFamily("ms-appx:///Assets/CalculatorIcons.ttf#Calculator Fluent Icons"), FontSize = 16 };
+    private static void SetOverlayButton(Button button, string glyph)
+    {
+        button.Content = GraphIcon(glyph); button.Width = 36; button.Height = 40;
+        button.Padding = new Thickness(0); button.BorderThickness = new Thickness(0);
+        button.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+        ToolTipService.SetToolTip(button, AutomationProperties.GetName(button));
     }
 
     private static TextBlock Heading(string text) => new() { Text = text, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
@@ -263,16 +245,15 @@ public sealed class GraphPanel : Grid
 
     private void ArrangePanels(double width)
     {
-        var compact = width < 760;
-        ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(330);
+        var compact = width < 800;
+        ColumnDefinitions[0].Width = new GridLength(compact ? 1 : 2, GridUnitType.Star);
+        ColumnDefinitions[1].MinWidth = compact ? 0 : 300;
         ColumnDefinitions[1].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-        RowDefinitions[0].Height = GridLength.Auto;
-        RowDefinitions[1].Height = new GridLength(1, GridUnitType.Star);
-        SetColumn(_plotArea, compact ? 0 : 1);
+        SetColumn(_optionsScroll, compact ? 0 : 1);
         _compactTabs.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
         _optionsScroll.Visibility = compact && _graphTab.IsChecked == true ? Visibility.Collapsed : Visibility.Visible;
         _plotArea.Visibility = compact && _graphTab.IsChecked != true ? Visibility.Collapsed : Visibility.Visible;
-        _canvas.MinHeight = compact ? 250 : 300;
+        _canvas.MinHeight = 0;
     }
 
     private void ShowCompactTab(bool graph)
@@ -358,9 +339,15 @@ public sealed class GraphPanel : Grid
 
     private bool ReplaceEquations(IEnumerable<string> equations, int angle)
     {
-        if (!_graph.Update(equations, angle)) return false;
+        var rows = equations.ToArray();
+        if (rows.Length == 0)
+        {
+            for (var index = _graph.GetSnapshot().Equations.Count - 1; index >= 0; index--)
+                if (!_graph.RemoveEquation(index)) return false;
+        }
+        else if (!_graph.Update(rows, angle)) return false;
         _drafts.Clear();
-        _pendingEquation = null;
+        _pendingEquation = rows.Length == 0 ? "" : null;
         return true;
     }
 
@@ -442,6 +429,7 @@ public sealed class GraphPanel : Grid
         try
         {
             _angle.SelectedIndex = snapshot.AngleUnit;
+            _activeTraceToggle.IsEnabled = snapshot.Equations.Any(equation => equation.Visible);
             foreach (var feature in _featureControls) feature.Value.IsChecked = (snapshot.Settings.FeaturesMask & feature.Key) != 0;
             double[] values = [snapshot.Range.Left, snapshot.Range.Right, snapshot.Range.Bottom, snapshot.Range.Top];
             for (var index = 0; index < _ranges.Length; index++)
@@ -487,7 +475,7 @@ public sealed class GraphPanel : Grid
             var contents = new StackPanel { Spacing = 5 };
             var select = new RadioButton
             {
-                Content = $"Equation {row + 1}",
+                Content = "", MinWidth = 28, MinHeight = 40, Padding = new Thickness(0),
                 GroupName = _selectionGroup,
                 IsChecked = equation.Selected,
                 HorizontalAlignment = HorizontalAlignment.Stretch
@@ -499,47 +487,40 @@ public sealed class GraphPanel : Grid
                 if (version == _rowControlVersion && !_refreshing && !_mutating)
                     Mutate(() => _graph.SetSelected(index), false);
             };
-            contents.Children.Add(select);
+            select.Resources["RadioButtonForegroundChecked"] = rowBrush;
             var editor = CreateEquationEditor(index, _drafts.GetValueOrDefault(index, equation.Input), version);
-            contents.Children.Add(editor);
-            var formatted = new TextBlock { Text = FormatEquation(editor.Text), TextWrapping = TextWrapping.Wrap, FontSize = 20, Opacity = 0.8 };
-            editor.TextChanged += (_, _) => formatted.Text = FormatEquation(editor.Text);
-            AutomationProperties.SetName(formatted, $"Formatted equation {row + 1}");
-            contents.Children.Add(formatted);
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-            actions.Children.Add(Button("Plot", () =>
+            var equationLine = new Grid();
+            equationLine.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+            equationLine.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            equationLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            equationLine.Children.Add(select); SetColumn(editor, 1); equationLine.Children.Add(editor);
+            var more = new Button { Content = new FontIcon { Glyph = "\uE712", FontSize = 16 }, Width = 32,
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(0) };
+            AutomationProperties.SetName(more, $"Equation {row + 1} options");
+            var actions = new MenuFlyout();
+            void Action(string title, Action action)
             {
-                if (version == _rowControlVersion) SubmitEquation(index, editor.Text);
-            }, $"Plot equation {row + 1}"));
-            actions.Children.Add(Button("Analyze", () =>
-            {
-                if (version == _rowControlVersion && Mutate(() => _graph.SetSelected(index), false))
-                    _analysis.StartBringIntoView();
-            }, $"Analyze equation {row + 1}"));
-            actions.Children.Add(Button("×", () =>
-            {
-                if (version == _rowControlVersion) RemoveEquation(index);
-            }, $"Remove equation {row + 1}"));
-            contents.Children.Add(actions);
-            var appearance = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            var visible = new CheckBox { Content = "Show curve", IsChecked = equation.Visible };
-            AutomationProperties.SetName(visible, $"Show equation {row + 1}");
-            visible.Click += (_, _) =>
-            {
-                if (version == _rowControlVersion && !_refreshing && !_mutating)
-                    Mutate(() => _graph.SetVisible(index, visible.IsChecked == true), false);
-            };
-            appearance.Children.Add(visible);
-            appearance.Children.Add(FlyoutButton("Line options", () => BuildLineOptions(index, version, rowBrush)));
-            contents.Children.Add(appearance);
+                var item = new MenuFlyoutItem { Text = title };
+                item.Click += (_, _) => { if (version == _rowControlVersion) action(); };
+                actions.Items.Add(item);
+            }
+            Action("Plot", () => SubmitEquation(index, editor.Text));
+            Action("Analyze", () => { if (Mutate(() => _graph.SetSelected(index), false)) analysis.IsExpanded = true; });
+            var visible = new ToggleMenuFlyoutItem { Text = "Show curve", IsChecked = equation.Visible };
+            visible.Click += (_, _) => { if (version == _rowControlVersion && !_refreshing && !_mutating) Mutate(() => _graph.SetVisible(index, visible.IsChecked), false); };
+            actions.Items.Add(visible);
+            Action("Line options", () => new Flyout { Content = BuildLineOptions(index, version, rowBrush) }.ShowAt(more));
+            Action("Remove", () => RemoveEquation(index));
+            more.Flyout = actions; SetColumn(more, 2); equationLine.Children.Add(more);
+            contents.Children.Add(equationLine);
             foreach (var parameter in equation.Parameters)
                 if (shownParameters.Add(parameter.Name)) contents.Children.Add(BuildParameter(index, parameter));
             var border = new Border
             {
                 Child = contents,
-                Padding = new Thickness(8, 4, 0, 4),
-                BorderThickness = new Thickness(3, 0, 0, 0),
-                BorderBrush = rowBrush
+                Padding = new Thickness(0, 4, 0, 4),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 128, 128, 128))
             };
             _equationRows.Children.Add(border);
         }
@@ -548,7 +529,6 @@ public sealed class GraphPanel : Grid
             var index = snapshot.Equations.Count;
             var editor = CreateEquationEditor(index, pending, _rowControlVersion);
             var pendingCard = new StackPanel { Spacing = 5 };
-            pendingCard.Children.Add(Heading($"Equation {index + 1}"));
             pendingCard.Children.Add(editor);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             actions.Children.Add(Button("Plot", () => SubmitEquation(index, editor.Text)));
@@ -572,7 +552,10 @@ public sealed class GraphPanel : Grid
 
     private TextBox CreateEquationEditor(int row, string text, int version)
     {
-        var editor = new TextBox { Text = text, PlaceholderText = "Enter an equation", FontSize = 18 };
+        var editor = new TextBox { Text = text, PlaceholderText = "Enter an expression", FontSize = 20,
+            BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), MinHeight = 40 };
+        editor.Resources["TextBoxBackground"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        editor.Resources["TextBoxBorderBrush"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         AutomationProperties.SetName(editor, $"Equation {row + 1}");
         AutomationProperties.SetAutomationId(editor, $"graphEquation{row}");
         _editors[row] = editor;
@@ -765,8 +748,23 @@ public sealed class GraphPanel : Grid
     private StackPanel BuildGraphSettings()
     {
         var contents = new StackPanel { Spacing = 10, MinWidth = 250, MaxWidth = 290 };
+        if (_angle.Parent is Panel previousAngle) previousAngle.Children.Remove(_angle);
         var settings = _snapshot?.Settings ?? new GraphSettings(2, "#FFFFFFFF", "#FF2D2D2D", "#FF646464", "#FFDCDCDC");
-        contents.Children.Add(Heading("Graph settings"));
+        contents.Children.Add(Heading("Graph options"));
+        contents.Children.Add(_angle);
+        var ranges = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+        ranges.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ranges.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ranges.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        ranges.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        for (var index = 0; index < _ranges.Length; index++)
+        {
+            if (_ranges[index].Parent is Panel previous) previous.Children.Remove(_ranges[index]);
+            SetRow(_ranges[index], index / 2); SetColumn(_ranges[index], index % 2); ranges.Children.Add(_ranges[index]);
+        }
+        contents.Children.Add(ranges); contents.Children.Add(Button("Apply range", ApplyRanges));
+        if (_traceToggle.Parent is Panel previousTrace) previousTrace.Children.Remove(_traceToggle);
+        contents.Children.Add(_traceToggle);
         var width = new ComboBox { Header = "Line thickness", ItemsSource = new[] { "1", "2", "3", "4" }, SelectedIndex = Math.Clamp((int)settings.LineWidth - 1, 0, 3), HorizontalAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetName(width, "Line thickness");
         contents.Children.Add(width);
@@ -1019,6 +1017,7 @@ public sealed class GraphPanel : Grid
     private void ClearTrace()
     {
         _canvas.SetTrace(null);
+        _inspector.Visibility = Visibility.Collapsed;
         _inspector.Text = _traceToggle.IsChecked == true ? "Move over a curve to inspect its coordinates." : "Drag to pan. Scroll to zoom.";
     }
 
@@ -1027,6 +1026,7 @@ public sealed class GraphPanel : Grid
         var color = _snapshot is { } snapshot && trace.Row >= 0 && trace.Row < snapshot.Equations.Count
             ? snapshot.Equations[trace.Row].Color : "#0078D4";
         _canvas.SetTrace(new GraphCanvasTrace(trace.ScreenX, trace.ScreenY, color));
+        _inspector.Visibility = Visibility.Visible;
         _inspector.Text = $"Equation {trace.Row + 1}: x = {trace.X:G6}, y = {trace.Y:G6}"
             + (trace.Rho is { } rho ? $", ρ = {rho:G6}" : "")
             + (trace.Theta is { } theta ? $", θ = {theta:G6}" : "")
@@ -1108,6 +1108,7 @@ public sealed class GraphPanel : Grid
         var stage = "initial graph";
         var passed = false;
         var originalSettings = _snapshot?.Settings ?? new GraphSettings(2, "#FFFFFFFF", "#FF2D2D2D", "#FF646464", "#FFDCDCDC");
+        var originalEquations = _snapshot?.Equations.Select(equation => equation.Input).ToArray() ?? [];
         var originalAppearance = _snapshot?.Equations.Take(2).ToArray() ?? [];
         var originalFollowTheme = _followAppTheme;
         var originalHoverTrace = _traceToggle.IsChecked == true;
@@ -1199,7 +1200,7 @@ public sealed class GraphPanel : Grid
                 && Mutate(() => _graph.SetSettings(3, "#FF102030", "#FFAABBCC", "#FF405060", "#FF708090"), false, false),
                 "Line style or graph settings were rejected.");
             Require(_snapshot!.Equations[0].LineStyle == 2 && _snapshot.Settings.LineWidth == 3
-                && BuildGraphSettings().Children.OfType<ComboBox>().First().SelectedIndex == 2,
+                && BuildGraphSettings().Children.OfType<ComboBox>().First(combo => Equals(combo.Header, "Line thickness")).SelectedIndex == 2,
                 "Appearance snapshots or settings controls did not update.");
             stage = "scene image export";
             var exportScene = _graph.GetScene(320, 240);
@@ -1261,7 +1262,7 @@ public sealed class GraphPanel : Grid
             _drafts.Clear();
             _pendingEquation = null;
             _focusedRow = 0;
-            if (!Mutate(() => ReplaceEquations(new[] { "y=x^2-4", "y=x" }, 0))
+            if (!Mutate(() => ReplaceEquations(originalEquations, 0))
                 || !Mutate(() => _graph.SetSettings(originalSettings.LineWidth, originalSettings.Background, originalSettings.Text, originalSettings.Axis, originalSettings.Grid), false, false)
                 || !Mutate(() => _graph.SetFeatures(originalSettings.FeaturesMask), false, false)
                 || !Mutate(() => _graph.SetGrid(originalSettings.ShowAxes, originalSettings.ShowGrid), false, false)
@@ -1274,7 +1275,7 @@ public sealed class GraphPanel : Grid
                 }
                 passed = false;
             }
-            for (var row = 0; row < 2; row++)
+            for (var row = 0; row < originalAppearance.Length; row++)
             {
                 var index = row;
                 var color = row < originalAppearance.Length ? originalAppearance[row].Color : Palette[row].Color;
@@ -1282,7 +1283,7 @@ public sealed class GraphPanel : Grid
                 if (!Mutate(() => _graph.SetColor(index, color), false, false)
                     || !Mutate(() => _graph.SetLineStyle(index, style), false, false)) passed = false;
             }
-            if (!Mutate(() => _graph.SetSelected(0))) passed = false;
+            if (originalEquations.Length > 0 && !Mutate(() => _graph.SetSelected(0))) passed = false;
             _followAppTheme = originalFollowTheme;
             if (!passed)
             {

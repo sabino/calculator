@@ -95,6 +95,7 @@ namespace Desktop
         size_t GetFromUnitIndex() const;
         size_t GetToUnitIndex() const;
         const CurrencyState& GetCurrencyState() const;
+        double GetCurrencyRatio() const;
         void SetCurrencyRates(std::string_view referenceDate, std::string_view fetchedAt, std::string_view rates, bool fromCache,
                               int provider = 0, std::string_view referenceEndDate = {});
         void SetCurrencyProvider(int provider);
