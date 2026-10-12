@@ -12,6 +12,7 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
+        DispatcherShutdownMode = DispatcherShutdownMode.OnLastWindowClose;
         UnhandledException += (_, args) => Console.Error.WriteLine(args.Exception);
     }
 

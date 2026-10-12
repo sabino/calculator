@@ -90,7 +90,7 @@ public sealed class CalculatorPage : Page
                 }
                 finally
                 {
-                    Application.Current.Exit();
+                    window.Close();
                 }
             }
         };
